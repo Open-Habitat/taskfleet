@@ -253,7 +253,7 @@ fn ask_or_attach(
     paths: &RunPaths,
     node_id: &NodeId,
 ) -> Result<Start, CliError> {
-    let guard = RunLock::acquire_existing(&paths.lock()).map_err(from_core)?;
+    let guard = crate::run::ask::lock_run(paths)?;
     let witness = guard.witness();
     let (manifest, node) = load(paths, node_id)?;
     let key = envelope_key(node_id, &args.idempotency_key);
@@ -406,40 +406,24 @@ fn observe(paths: &RunPaths, node_id: &NodeId, ask_id: u64) -> Result<Seen, CliE
 fn closure_from_log(paths: &RunPaths, node_id: &NodeId, ask_id: u64) -> Result<Closure, CliError> {
     let events = RunLock::with_shared_lock(&paths.lock(), || read_all_events(&paths.events()))
         .map_err(from_core)?;
-    for ev in events.iter().filter(|e| {
-        e.node_id.as_ref() == Some(node_id)
-            && e.data.get("ask_id").and_then(Value::as_u64) == Some(ask_id)
-    }) {
-        let s = |k: &str| ev.data.get(k).and_then(Value::as_str).map(str::to_string);
-        match ev.kind.as_str() {
-            "node.answered" => {
-                return Ok(Closure {
-                    outcome: AskOutcome::Answered,
-                    answer: s("answer"),
-                    choice: s("choice"),
-                    decided_by: s("decided_by"),
-                    cancel_reason: None,
-                })
-            }
-            "node.ask_timed_out" => {
-                return Ok(Closure {
-                    outcome: AskOutcome::TimedOut,
-                    answer: None,
-                    choice: None,
-                    decided_by: None,
-                    cancel_reason: None,
-                })
-            }
-            _ => {}
-        }
-    }
-    Ok(Closure {
-        outcome: AskOutcome::Cancelled,
-        answer: None,
-        choice: None,
-        decided_by: None,
-        cancel_reason: Some("node or attempt ended".into()),
-    })
+    Ok(
+        match crate::run::ask::logged_closure(&events, node_id, ask_id) {
+            Some(c) => Closure {
+                outcome: c.outcome,
+                answer: c.answer,
+                choice: c.choice,
+                decided_by: c.decided_by,
+                cancel_reason: None,
+            },
+            None => Closure {
+                outcome: AskOutcome::Cancelled,
+                answer: None,
+                choice: None,
+                decided_by: None,
+                cancel_reason: Some("node or attempt ended".into()),
+            },
+        },
+    )
 }
 
 pub fn run(args: Args<'_>) -> Result<(), CliError> {
@@ -476,7 +460,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         match observe(&paths, &node_id, asked.ask_id)? {
             Seen::Closed(c) => break c,
             Seen::Open { expired: true, .. } => {
-                let guard = RunLock::acquire_existing(&paths.lock()).map_err(from_core)?;
+                let guard = crate::run::ask::lock_run(&paths)?;
                 crate::run::ask::time_out_if_expired(
                     &guard.witness(),
                     &paths,

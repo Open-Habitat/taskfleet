@@ -158,6 +158,8 @@ fn malformed_events_are_rejected_before_entering_the_log() {
         json!({"ask_id": id, "answer": "x", "choice": "a", "decided_by": "agent"}),
         json!({"ask_id": id, "answer": "x", "decided_by": "boss"}),
         json!({"ask_id": id, "choice": "zzz", "decided_by": "agent"}),
+        json!({"ask_id": id, "answer": "keep", "choice": 123, "decided_by": "agent"}),
+        json!({"ask_id": id, "answer": 7, "choice": "a", "decided_by": "agent"}),
     ] {
         assert!(run.append("node.answered", bad).is_err());
     }

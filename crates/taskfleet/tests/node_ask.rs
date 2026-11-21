@@ -601,3 +601,156 @@ fn answer_racing_the_deadline_leaves_one_closing_event() {
         }
     }
 }
+
+/// An unknown run is a usage error (exit 1), never exit 2, which an asking
+/// worker reads as `timed_out`.
+#[test]
+fn unknown_run_is_exit_one_not_a_timeout() {
+    let home = TestHome::new();
+    let out = run_exit(
+        &mut ask(
+            home.path(),
+            "01m7yhebct9x5jnnecf3d24mgz",
+            "k",
+            &["--wait", "0s"],
+        ),
+        1,
+    );
+    assert_eq!(out["error"]["code"], "run_not_found");
+    let out = run_exit(
+        bin(home.path()).args([
+            "--output",
+            "json",
+            "run",
+            "answer",
+            "01m7yhebct9x5jnnecf3d24mgz",
+            "--ask",
+            "3",
+            "--text",
+            "x",
+        ]),
+        1,
+    );
+    assert_eq!(out["error"]["code"], "run_not_found");
+}
+
+/// A run made terminal while its node's question is still open refuses the
+/// parent's answer, matching the worker, which reads it as cancelled.
+#[test]
+fn answer_after_the_run_ended_is_refused() {
+    let home = TestHome::new();
+    let id = pending_run(home.path());
+    let first = run_exit(&mut ask(home.path(), &id, "r1", &["--wait", "0s"]), 4);
+    let ask_id = first["data"]["ask_id"].as_u64().unwrap().to_string();
+    let keep = TempDir::new().unwrap();
+    let f = keep.path().join("s.json");
+    std::fs::write(&f, r#"{"status":"cancelled"}"#).unwrap();
+    run_exit(
+        bin(home.path()).args([
+            "--output",
+            "json",
+            "event",
+            "create",
+            &id,
+            "--kind",
+            "run.status",
+            "--from-file",
+            f.to_str().unwrap(),
+        ]),
+        0,
+    );
+    let refused = run_exit(
+        bin(home.path()).args([
+            "--output", "json", "run", "answer", &id, "--ask", &ask_id, "--choice", "drop",
+        ]),
+        1,
+    );
+    assert_eq!(refused["error"]["code"], "ask_closed");
+    assert_eq!(refused["error"]["details"]["outcome"], "cancelled");
+    assert_eq!(count(home.path(), &id, "node.answered"), 0);
+    let worker = run_exit(&mut ask(home.path(), &id, "r1", &["--wait", "0s"]), 3);
+    assert_eq!(worker["data"]["outcome"], "cancelled");
+}
+
+/// Replaying an identical answer still succeeds after a later question has
+/// closed and replaced `last_ask`; a different answer is refused as closed.
+#[test]
+fn answer_replay_survives_a_later_question() {
+    let home = TestHome::new();
+    let id = pending_run(home.path());
+    let a = run_exit(&mut ask(home.path(), &id, "a", &["--wait", "0s"]), 4);
+    let a_id = a["data"]["ask_id"].as_u64().unwrap().to_string();
+    let answer = |ask: &str, choice: &str, want: i32| {
+        run_exit(
+            bin(home.path()).args([
+                "--output", "json", "run", "answer", &id, "--ask", ask, "--choice", choice,
+            ]),
+            want,
+        )
+    };
+    answer(&a_id, "drop", 0);
+    let b = run_exit(&mut ask(home.path(), &id, "b", &["--wait", "0s"]), 4);
+    let b_id = b["data"]["ask_id"].as_u64().unwrap().to_string();
+    answer(&b_id, "keep", 0);
+    let replay = answer(&a_id, "drop", 0);
+    assert_eq!(replay["data"]["replayed"], true);
+    let other = answer(&a_id, "keep", 1);
+    assert_eq!(other["error"]["code"], "ask_closed");
+    assert_eq!(other["error"]["details"]["outcome"], "answered");
+    assert_eq!(count(home.path(), &id, "node.answered"), 2);
+}
+
+/// A writer that crashed after appending its closing event but before
+/// updating the projection is replayed before the next decision, so a second
+/// answer is refused instead of appending a second closing event.
+#[test]
+fn unprojected_closing_event_is_replayed_before_answering() {
+    let home = TestHome::new();
+    let id = pending_run(home.path());
+    let first = run_exit(&mut ask(home.path(), &id, "crash", &["--wait", "0s"]), 4);
+    let ask_id = first["data"]["ask_id"].as_u64().unwrap();
+    let log = home.path().join("runs").join(&id).join("events.jsonl");
+    let last: Value = serde_json::from_str(
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap(),
+    )
+    .unwrap();
+    let line = json!({
+        "ts": chrono_now(),
+        "seq": last["seq"].as_u64().unwrap() + 1,
+        "kind": "node.answered",
+        "run_id": id,
+        "node_id": "n-0001",
+        "idempotency_key": null,
+        "data": {"ask_id": ask_id, "choice": "drop", "decided_by": "agent"},
+    });
+    let mut text = std::fs::read_to_string(&log).unwrap();
+    text.push_str(&line.to_string());
+    text.push('\n');
+    std::fs::write(&log, text).unwrap();
+    let refused = run_exit(
+        bin(home.path()).args([
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--choice",
+            "keep",
+        ]),
+        1,
+    );
+    assert_eq!(refused["error"]["code"], "ask_closed");
+    assert_eq!(count(home.path(), &id, "node.answered"), 1);
+    let worker = run_exit(&mut ask(home.path(), &id, "crash", &["--wait", "0s"]), 0);
+    assert_eq!(worker["data"]["take"], "drop");
+}
+
+fn chrono_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}

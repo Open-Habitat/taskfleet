@@ -268,8 +268,19 @@ pub(super) fn reduce_node_answered(paths: &RunPaths, ev: &Event) -> Result<Vec<P
     let events_path = paths.events();
     let node_id = require_envelope_node_id(&events_path, ev)?;
     let id = ask_id(&events_path, ev)?;
-    let answer = str_field(ev, "answer");
-    let choice = str_field(ev, "choice");
+    // Absent and wrong-typed are different: a present non-string field is
+    // malformed, never "not given".
+    let typed = |k: &str| match ev.data.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(v)) => Ok(Some(v.as_str())),
+        Some(_) => Err(corrupt(
+            &events_path,
+            ev,
+            &format!("`{k}` must be a string"),
+        )),
+    };
+    let answer = typed("answer")?;
+    let choice = typed("choice")?;
     let shape_ok = match (answer, choice) {
         (Some(a), None) => valid_ask_text(a, MAX_ASK_ANSWER_BYTES),
         (None, Some(c)) => valid_ask_option(c),

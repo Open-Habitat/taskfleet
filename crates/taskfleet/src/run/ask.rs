@@ -19,8 +19,9 @@ use serde::Serialize;
 use serde_json::json;
 
 use taskfleet_core::{
-    append_and_apply_unlocked, read_manifest_opt, read_node_opt, AskOutcome, ClosedAsk, LockedRun,
-    Node, NodeId, OpenAsk, RunLock, RunPaths,
+    append_and_apply_unlocked, read_all_events, read_manifest_opt, read_node_opt,
+    replay_unapplied_unlocked, AskOutcome, ClosedAsk, Event, Exclusive, LockedRun, Node, NodeId,
+    OpenAsk, RunLock, RunPaths,
 };
 
 use crate::error::CliError;
@@ -69,6 +70,7 @@ impl OpenAskView {
         } else {
             format!(" --node {node_id}")
         };
+        // A single runnable command; with options, `--text` works too.
         let answer_hint = if open.options.is_empty() {
             format!(
                 "taskfleet run answer {run_id}{node_flag} --ask {} --text '<answer>'",
@@ -76,7 +78,7 @@ impl OpenAskView {
             )
         } else {
             format!(
-                "taskfleet run answer {run_id}{node_flag} --ask {} --choice '<option>' (or --text '<answer>')",
+                "taskfleet run answer {run_id}{node_flag} --ask {} --choice '<option>'",
                 open.ask_id
             )
         };
@@ -163,6 +165,72 @@ pub fn views(
     (open, last)
 }
 
+/// Take the run's exclusive lock and catch its projections up to the log, so
+/// every decision below reads state that includes each durably appended event
+/// (a writer that crashed between append and projection is replayed first). A
+/// run whose directory has no lock file is refused as `run_not_found` (exit
+/// 1), never as an I/O error: exit 2 means `timed_out` to an asking worker.
+pub(crate) fn lock_run(paths: &RunPaths) -> Result<RunLock<Exclusive>, CliError> {
+    if !paths.lock().exists() {
+        return Err(
+            CliError::user("run_not_found", format!("run {} not found", paths.run_id))
+                .with_invalid_value(paths.run_id.to_string()),
+        );
+    }
+    let guard = RunLock::acquire_existing(&paths.lock()).map_err(from_core)?;
+    replay_unapplied_unlocked(&guard.witness(), paths).map_err(from_core)?;
+    Ok(guard)
+}
+
+/// A question's closing event as found in the log.
+pub(crate) struct LoggedClosure {
+    pub seq: u64,
+    pub outcome: AskOutcome,
+    pub answer: Option<String>,
+    pub choice: Option<String>,
+    pub decided_by: Option<String>,
+}
+
+/// Find how question `ask_id` of `node_id` closed, from its first closing event
+/// (`node.answered` or `node.ask_timed_out`) in the log. `None` when neither
+/// exists: it is still open, or its node ended (`cancelled`, a fold with no
+/// event of its own). The caller holds a lock.
+pub(crate) fn logged_closure(
+    events: &[Event],
+    node_id: &NodeId,
+    ask_id: u64,
+) -> Option<LoggedClosure> {
+    let open_seen_at = events.iter().position(|e| {
+        e.kind == "node.asked" && e.seq == ask_id && e.node_id.as_ref() == Some(node_id)
+    })?;
+    events[open_seen_at..]
+        .iter()
+        .filter(|e| {
+            e.node_id.as_ref() == Some(node_id)
+                && e.data.get("ask_id").and_then(serde_json::Value::as_u64) == Some(ask_id)
+        })
+        .find_map(|e| {
+            let s = |k: &str| {
+                e.data
+                    .get(k)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            };
+            let outcome = match e.kind.as_str() {
+                "node.answered" => AskOutcome::Answered,
+                "node.ask_timed_out" => AskOutcome::TimedOut,
+                _ => return None,
+            };
+            Some(LoggedClosure {
+                seq: e.seq,
+                outcome,
+                answer: s("answer"),
+                choice: s("choice"),
+                decided_by: s("decided_by"),
+            })
+        })
+}
+
 /// Close the open question as timed out if, under the held lock, it is past
 /// its deadline. Returns true when this call appended `node.ask_timed_out`.
 pub(crate) fn time_out_if_expired(
@@ -237,24 +305,43 @@ fn target(run_id: &str, node_id: &str) -> Result<Target, CliError> {
     Ok(Target { paths, node_id })
 }
 
-fn load(t: &Target) -> Result<Node, CliError> {
-    read_manifest_opt(&t.paths)
+/// The node, plus the run's status when the run is terminal.
+fn load(t: &Target) -> Result<(Node, Option<&'static str>), CliError> {
+    let manifest = read_manifest_opt(&t.paths)
         .map_err(from_core)?
         .ok_or_else(|| {
             CliError::user("run_not_found", format!("run {} not found", t.paths.run_id))
                 .with_invalid_value(t.paths.run_id.to_string())
         })?;
-    read_node_opt(&t.paths, &t.node_id)
+    let ended = manifest
+        .status
+        .is_terminal()
+        .then(|| crate::run::status_kebab(manifest.status));
+    let node = read_node_opt(&t.paths, &t.node_id)
         .map_err(from_core)?
         .ok_or_else(|| {
             CliError::user("node_not_found", format!("node {} not found", t.node_id))
                 .with_invalid_value(t.node_id.as_str())
-        })
+        })?;
+    Ok((node, ended))
 }
 
 /// The refusal for a question that is not open: how it ended and what the
 /// worker took, or which question is open instead.
-fn not_open(t: &Target, node: &Node, ask_id: u64) -> CliError {
+fn not_open(t: &Target, node: &Node, ended: Option<&str>, ask_id: u64) -> CliError {
+    if let Some(status) =
+        ended.filter(|_| node.open_ask.as_deref().is_some_and(|o| o.ask_id == ask_id))
+    {
+        return CliError::user(
+            "ask_closed",
+            format!(
+                "ask {ask_id} of run {} is closed (cancelled): the run is {status}, so the worker stopped",
+                t.paths.run_id
+            ),
+        )
+        .with_invalid_value(ask_id.to_string())
+        .with_details(json!({"ask_id": ask_id, "outcome": "cancelled", "took_default": false}));
+    }
     if let Some(last) = node.last_ask.as_deref().filter(|l| l.ask.ask_id == ask_id) {
         let view = LastAskView::build(last);
         let took = match last.outcome {
@@ -272,6 +359,25 @@ fn not_open(t: &Target, node: &Node, ask_id: u64) -> CliError {
         )
         .with_invalid_value(ask_id.to_string())
         .with_details(serde_json::to_value(view).unwrap_or_default());
+    }
+    if let Some(c) = read_all_events(&t.paths.events())
+        .ok()
+        .and_then(|events| logged_closure(&events, &t.node_id, ask_id))
+    {
+        return CliError::user(
+            "ask_closed",
+            format!(
+                "ask {ask_id} of run {} is closed ({}) and a later question has closed since",
+                t.paths.run_id,
+                c.outcome.wire()
+            ),
+        )
+        .with_invalid_value(ask_id.to_string())
+        .with_details(json!({
+            "ask_id": ask_id,
+            "outcome": c.outcome.wire(),
+            "took_default": c.outcome == AskOutcome::TimedOut,
+        }));
     }
     if let Some(open) = node.open_ask.as_deref() {
         return CliError::user(
@@ -314,46 +420,60 @@ pub fn answer(args: AnswerArgs<'_>) -> Result<(), CliError> {
             ));
         }
     }
-    let guard = RunLock::acquire_existing(&t.paths.lock()).map_err(from_core)?;
+    let guard = lock_run(&t.paths)?;
     let witness = guard.witness();
-    let node = load(&t)?;
+    let (node, ended) = load(&t)?;
     let now = Utc::now();
     let is_open = node
         .open_ask
         .as_deref()
         .is_some_and(|o| o.ask_id == args.ask_id)
-        && !node.status.is_terminal();
+        && !node.status.is_terminal()
+        && ended.is_none();
     if !is_open {
-        // An identical repeat of the answer that closed it is a replay.
-        if let Some(last) = node
+        // An identical repeat of the answer that closed it is a replay, even
+        // when a later question has closed since.
+        let closed = node
             .last_ask
             .as_deref()
-            .filter(|l| l.ask.ask_id == args.ask_id && l.outcome == AskOutcome::Answered)
-        {
-            if last.answer == answer
-                && last.choice == choice
-                && last.decided_by.as_deref() == Some(args.decided_by)
-            {
-                let payload = AnswerPayload {
-                    run_id: t.paths.run_id.to_string(),
-                    node_id: t.node_id.to_string(),
-                    ask_id: args.ask_id,
-                    outcome: "answered",
-                    answer,
-                    choice,
-                    decided_by: args.decided_by.to_string(),
-                    event_seq: last.closed_seq,
-                    replayed: true,
-                };
-                drop(guard);
-                return emit_answer(&payload, args.spec, args.warnings);
-            }
+            .filter(|l| l.ask.ask_id == args.ask_id)
+            .map(|l| LoggedClosure {
+                seq: l.closed_seq,
+                outcome: l.outcome,
+                answer: l.answer.clone(),
+                choice: l.choice.clone(),
+                decided_by: l.decided_by.clone(),
+            })
+            .or_else(|| {
+                read_all_events(&t.paths.events())
+                    .ok()
+                    .and_then(|events| logged_closure(&events, &t.node_id, args.ask_id))
+            });
+        if let Some(c) = closed.filter(|c| {
+            c.outcome == AskOutcome::Answered
+                && c.answer == answer
+                && c.choice == choice
+                && c.decided_by.as_deref() == Some(args.decided_by)
+        }) {
+            let payload = AnswerPayload {
+                run_id: t.paths.run_id.to_string(),
+                node_id: t.node_id.to_string(),
+                ask_id: args.ask_id,
+                outcome: "answered",
+                answer,
+                choice,
+                decided_by: args.decided_by.to_string(),
+                event_seq: c.seq,
+                replayed: true,
+            };
+            drop(guard);
+            return emit_answer(&payload, args.spec, args.warnings);
         }
-        return Err(not_open(&t, &node, args.ask_id));
+        return Err(not_open(&t, &node, ended, args.ask_id));
     }
     if time_out_if_expired(&witness, &t.paths, &t.node_id, args.ask_id, now)? {
-        let node = load(&t)?;
-        return Err(not_open(&t, &node, args.ask_id));
+        let (node, ended) = load(&t)?;
+        return Err(not_open(&t, &node, ended, args.ask_id));
     }
     let open = node.open_ask.as_deref().expect("checked open above");
     if let Some(c) = &choice {
@@ -462,21 +582,22 @@ pub fn escalate(args: EscalateArgs<'_>) -> Result<(), CliError> {
         }
     }
     let t = target(&args.run_id, &args.node_id)?;
-    let guard = RunLock::acquire_existing(&t.paths.lock()).map_err(from_core)?;
+    let guard = lock_run(&t.paths)?;
     let witness = guard.witness();
-    let node = load(&t)?;
+    let (node, ended) = load(&t)?;
     let now = Utc::now();
     let is_open = node
         .open_ask
         .as_deref()
         .is_some_and(|o| o.ask_id == args.ask_id)
-        && !node.status.is_terminal();
+        && !node.status.is_terminal()
+        && ended.is_none();
     if !is_open {
-        return Err(not_open(&t, &node, args.ask_id));
+        return Err(not_open(&t, &node, ended, args.ask_id));
     }
     if time_out_if_expired(&witness, &t.paths, &t.node_id, args.ask_id, now)? {
-        let node = load(&t)?;
-        return Err(not_open(&t, &node, args.ask_id));
+        let (node, ended) = load(&t)?;
+        return Err(not_open(&t, &node, ended, args.ask_id));
     }
     let mut data = json!({"ask_id": args.ask_id});
     if let Some(s) = extend_secs {
@@ -494,7 +615,7 @@ pub fn escalate(args: EscalateArgs<'_>) -> Result<(), CliError> {
         data,
     )
     .map_err(from_core)?;
-    let node = load(&t)?;
+    let (node, _) = load(&t)?;
     drop(guard);
     let open = node
         .open_ask
@@ -548,7 +669,7 @@ mod tests {
         assert_eq!(v.state, "open");
         assert!(v.settles_wait());
         assert_eq!(v.remaining_secs, 60);
-        assert!(v.answer_hint.contains("--ask 9 --choice"));
+        assert!(v.answer_hint.ends_with("--ask 9 --choice '<option>'"));
         let v = OpenAskView::build("R", "n-0001", &open(true), o.asked_at);
         assert_eq!(v.state, "escalated");
         assert!(!v.settles_wait());
