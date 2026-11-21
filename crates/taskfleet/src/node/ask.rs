@@ -31,7 +31,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -84,7 +84,7 @@ struct Payload {
     options: Vec<String>,
     default: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<chrono::DateTime<Utc>>,
+    expires_at: Option<jiff::Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     answer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -357,7 +357,7 @@ fn ask_or_attach(
 enum Seen {
     Open {
         expired: bool,
-        expires_at: chrono::DateTime<Utc>,
+        expires_at: jiff::Timestamp,
     },
     Closed(Closure),
 }
@@ -390,7 +390,7 @@ fn observe(paths: &RunPaths, node_id: &NodeId, ask_id: u64) -> Result<Seen, CliE
             }));
         }
         return Ok(Seen::Open {
-            expired: Utc::now() >= open.expires_at,
+            expired: Timestamp::now() >= open.expires_at,
             expires_at: open.expires_at,
         });
     }
@@ -470,7 +470,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                     &paths,
                     &node_id,
                     asked.ask_id,
-                    Utc::now(),
+                    Timestamp::now(),
                 )?;
                 drop(guard);
             }
@@ -503,7 +503,8 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                     };
                     return finish(&payload, 4, args.spec, args.warnings);
                 }
-                let until_deadline = (at - Utc::now()).to_std().unwrap_or_default();
+                let until_deadline =
+                    Duration::try_from(at.duration_since(Timestamp::now())).unwrap_or_default();
                 let nap = backoff
                     .min(args.wait.saturating_sub(elapsed))
                     .min(until_deadline)

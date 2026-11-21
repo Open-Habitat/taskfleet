@@ -719,7 +719,7 @@ fn unprojected_closing_event_is_replayed_before_answering() {
     )
     .unwrap();
     let line = json!({
-        "ts": chrono_now(),
+        "ts": rfc3339_now(),
         "seq": last["seq"].as_u64().unwrap() + 1,
         "kind": "node.answered",
         "run_id": id,
@@ -751,8 +751,8 @@ fn unprojected_closing_event_is_replayed_before_answering() {
     assert_eq!(worker["data"]["take"], "drop");
 }
 
-fn chrono_now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+fn rfc3339_now() -> String {
+    format!("{:.9}", jiff::Timestamp::now())
 }
 
 /// A retried worker attempt that reuses a key asks afresh; it does not attach
@@ -778,7 +778,7 @@ fn raw_append(home: &Path, run_id: &str, kind: &str, data: Value) {
     let mut text = std::fs::read_to_string(&log).unwrap();
     let last: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
     let line = json!({
-        "ts": chrono_now(),
+        "ts": rfc3339_now(),
         "seq": last["seq"].as_u64().unwrap() + 1,
         "kind": kind,
         "run_id": run_id,

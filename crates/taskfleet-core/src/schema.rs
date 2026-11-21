@@ -1338,15 +1338,15 @@ pub struct OpenAsk {
     /// The worker's idempotency key; re-asking with it re-attaches.
     pub idempotency_key: String,
     /// Envelope timestamp of `node.asked`.
-    pub asked_at: DateTime<Utc>,
+    pub asked_at: Timestamp,
     /// Deadline, fixed from `asked_at` + the requested timeout and moved only
     /// later, by `node.ask_escalated`.
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Timestamp,
     /// Set when the parent passed the question on to a person
     /// (`node.ask_escalated`). An escalated question no longer settles the
     /// parent's `run wait`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub escalated_at: Option<DateTime<Utc>>,
+    pub escalated_at: Option<Timestamp>,
     /// The parent's latest escalation note, if it gave one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escalation_note: Option<String>,
@@ -1384,7 +1384,7 @@ pub struct ClosedAsk {
     /// How it ended.
     pub outcome: AskOutcome,
     /// Envelope timestamp of the closing event.
-    pub closed_at: DateTime<Utc>,
+    pub closed_at: Timestamp,
     /// `seq` of the event that closed it.
     pub closed_seq: u64,
     /// Free-text answer (`answered` only).

@@ -14,7 +14,7 @@
 //! deadline leaves exactly one closing event and both sides report it. A
 //! refused late answer names the default the worker took.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::json;
 
@@ -37,8 +37,8 @@ pub struct OpenAskView {
     pub question: String,
     pub options: Vec<String>,
     pub default: String,
-    pub asked_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
+    pub asked_at: Timestamp,
+    pub expires_at: Timestamp,
     /// Seconds until the deadline, never negative.
     pub remaining_secs: i64,
     /// `open` (waiting for the parent), `escalated` (the parent passed it on to
@@ -47,7 +47,7 @@ pub struct OpenAskView {
     pub state: &'static str,
     pub escalated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub escalated_at: Option<DateTime<Utc>>,
+    pub escalated_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub escalation_note: Option<String>,
     /// Copyable parent command.
@@ -56,7 +56,7 @@ pub struct OpenAskView {
 
 impl OpenAskView {
     #[must_use]
-    pub fn build(run_id: &str, node_id: &str, open: &OpenAsk, now: DateTime<Utc>) -> Self {
+    pub fn build(run_id: &str, node_id: &str, open: &OpenAsk, now: Timestamp) -> Self {
         let expired = now >= open.expires_at;
         let state = if expired {
             "expired"
@@ -91,11 +91,7 @@ impl OpenAskView {
             default: open.default.clone(),
             asked_at: open.asked_at,
             expires_at: open.expires_at,
-            remaining_secs: open
-                .expires_at
-                .signed_duration_since(now)
-                .num_seconds()
-                .max(0),
+            remaining_secs: open.expires_at.duration_since(now).as_secs().max(0),
             state,
             escalated: open.escalated_at.is_some(),
             escalated_at: open.escalated_at,
@@ -119,7 +115,7 @@ pub struct LastAskView {
     pub default: String,
     /// `answered`, `timed_out`, or `cancelled`.
     pub outcome: &'static str,
-    pub closed_at: DateTime<Utc>,
+    pub closed_at: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -155,7 +151,7 @@ impl LastAskView {
 pub fn views(
     run_id: &str,
     node: &Node,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> (Option<OpenAskView>, Option<LastAskView>) {
     let open = (!node.status.is_terminal())
         .then_some(node.open_ask.as_deref())
@@ -238,7 +234,7 @@ pub(crate) fn time_out_if_expired(
     paths: &RunPaths,
     node_id: &NodeId,
     ask_id: u64,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<bool, CliError> {
     let node = read_node_opt(paths, node_id).map_err(from_core)?;
     let expired = node
@@ -423,7 +419,7 @@ pub fn answer(args: AnswerArgs<'_>) -> Result<(), CliError> {
     let guard = lock_run(&t.paths)?;
     let witness = guard.witness();
     let (node, ended) = load(&t)?;
-    let now = Utc::now();
+    let now = Timestamp::now();
     let is_open = node
         .open_ask
         .as_deref()
@@ -585,7 +581,7 @@ pub fn escalate(args: EscalateArgs<'_>) -> Result<(), CliError> {
     let guard = lock_run(&t.paths)?;
     let witness = guard.witness();
     let (node, ended) = load(&t)?;
-    let now = Utc::now();
+    let now = Timestamp::now();
     let is_open = node
         .open_ask
         .as_deref()
@@ -620,7 +616,14 @@ pub fn escalate(args: EscalateArgs<'_>) -> Result<(), CliError> {
     let open = node
         .open_ask
         .as_deref()
-        .map(|o| OpenAskView::build(t.paths.run_id.as_str(), t.node_id.as_str(), o, Utc::now()))
+        .map(|o| {
+            OpenAskView::build(
+                t.paths.run_id.as_str(),
+                t.node_id.as_str(),
+                o,
+                Timestamp::now(),
+            )
+        })
         .ok_or_else(|| CliError::system("io_error", "escalated question vanished"))?;
     let payload = EscalatePayload {
         run_id: t.paths.run_id.to_string(),
@@ -647,7 +650,7 @@ mod tests {
     use super::*;
 
     fn open(escalated: bool) -> OpenAsk {
-        let at: DateTime<Utc> = "2026-11-21T12:00:00Z".parse().unwrap();
+        let at: Timestamp = "2026-11-21T12:00:00Z".parse().unwrap();
         OpenAsk {
             ask_id: 9,
             attempt: 0,
@@ -656,7 +659,7 @@ mod tests {
             default: "small".into(),
             idempotency_key: "k".into(),
             asked_at: at,
-            expires_at: at + chrono::Duration::seconds(60),
+            expires_at: at + jiff::SignedDuration::from_secs(60),
             escalated_at: escalated.then_some(at),
             escalation_note: None,
         }

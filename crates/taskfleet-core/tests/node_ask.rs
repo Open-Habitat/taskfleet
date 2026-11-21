@@ -63,7 +63,7 @@ fn ask_opens_once_and_first_closing_event_wins() {
     let id = run.ask("k1");
     let open = run.node().open_ask.unwrap();
     assert_eq!(open.ask_id, id);
-    assert_eq!((open.expires_at - open.asked_at).num_seconds(), 60);
+    assert_eq!(open.expires_at.duration_since(open.asked_at).as_secs(), 60);
     // A second question while one is open is a no-op.
     run.ask("k2");
     assert_eq!(run.node().open_ask.unwrap().ask_id, id);

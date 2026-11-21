@@ -24,7 +24,7 @@
 
 use std::path::Path;
 
-use chrono::Duration;
+use jiff::{SignedDuration, Timestamp};
 use serde_json::Value;
 
 use super::{require_envelope_node_id, ProjectionOp};
@@ -106,9 +106,13 @@ fn secs(events_path: &Path, ev: &Event, key: &str) -> Result<Option<u64>> {
     }
 }
 
-fn duration(secs: u64) -> Duration {
-    // Bounded by MAX_ASK_TIMEOUT_SECS, far below i64::MAX.
-    Duration::seconds(i64::try_from(secs).unwrap_or(i64::MAX / 1000))
+/// `at + secs`, saturating at the end of the representable range. Validated
+/// inputs are bounded by `MAX_ASK_TIMEOUT_SECS`; saturation only keeps a
+/// corrupt event value from panicking the reducer.
+fn deadline(at: Timestamp, secs: u64) -> Timestamp {
+    let secs = i64::try_from(secs).unwrap_or(i64::MAX);
+    at.checked_add(SignedDuration::from_secs(secs))
+        .unwrap_or(Timestamp::MAX)
 }
 
 /// Close the open question, if any, as `cancelled` because its node ended.
@@ -217,7 +221,7 @@ pub(super) fn reduce_node_asked(paths: &RunPaths, ev: &Event) -> Result<Vec<Proj
         default: default.to_string(),
         idempotency_key: key.to_string(),
         asked_at: ev.ts,
-        expires_at: ev.ts + duration(timeout),
+        expires_at: deadline(ev.ts, timeout),
         escalated_at: None,
         escalation_note: None,
     }));
@@ -258,7 +262,7 @@ pub(super) fn reduce_node_ask_escalated(paths: &RunPaths, ev: &Event) -> Result<
         open.escalation_note = note;
     }
     if let Some(extend) = extend {
-        open.expires_at = open.expires_at.max(ev.ts + duration(extend));
+        open.expires_at = open.expires_at.max(deadline(ev.ts, extend));
     }
     n.updated_at = ev.ts;
     Ok(vec![ProjectionOp::Node(n)])

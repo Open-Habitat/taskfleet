@@ -867,7 +867,7 @@ fn read_outcome(
             .as_ref()
             .and_then(|m| crate::run::resident::view(m, node.as_ref()));
         let ask_views = node.as_ref().map_or_default(|n| {
-            crate::run::ask::views(paths.run_id.as_str(), n, chrono::Utc::now())
+            crate::run::ask::views(paths.run_id.as_str(), n, jiff::Timestamp::now())
         });
         Ok(GitInputs {
             resident,
