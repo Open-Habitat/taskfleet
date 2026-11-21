@@ -2,13 +2,14 @@
 created: 2026-11-21
 updated: 2026-11-21
 type: chore
-status: untriaged
+status: open
 priority: high
 provenance: other
 provenance_detail: observed by taskfleet run gate
 source_ref: taskfleet:01m7yhebct9x5jnnecf3d24mgv/gate:cargo-deny-advisories-2026-11-21
 originating_run: 01m7yhebct9x5jnnecf3d24mgv
 originating_run_kind: spinoff
+lane: unlaned
 ---
 
 # cargo deny advisories (chrono, humantime unmaintained; xattr unsound) turn the release gate red

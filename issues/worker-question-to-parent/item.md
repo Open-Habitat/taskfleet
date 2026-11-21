@@ -2,13 +2,14 @@
 created: 2026-11-21
 updated: 2026-11-21
 type: feature
-status: untriaged
+status: open
 priority: normal
 provenance: other
 provenance_detail: Open Habitat proposal approved by Jari 2026-11-21
 source_ref: taskfleet:01m7yhebct9x5jnnecf3d24mgv/brief:tf-ask-proposal
 originating_run: 01m7yhebct9x5jnnecf3d24mgv
 originating_run_kind: spinoff
+lane: worker-messaging
 ---
 
 # Worker's blocking question to its parent (node ask / run answer)
