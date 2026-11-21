@@ -1823,7 +1823,7 @@ fn caller_same_key_retries_rejected_dead_transaction_in_one_call() {
             "op_id":"dead-operation", "source_branch":"main", "worker_branch":branch,
             "expected_source_oid":oid("main"), "worker_oid":oid(branch),
             "base_sha":oid("main"), "driver_pid":null, "driver_pid_start_secs":null,
-            "started_at":chrono::Utc::now(),
+            "started_at":jiff::Timestamp::now(),
             "caller_authority":{"intent_seq":intent.seq,"intent_key":intent.key,
                 "writer_dev":intent.writer_dev,"writer_ino":intent.writer_ino}
         }),

@@ -327,7 +327,7 @@ mod tests {
         let failing = WorkerExit {
             code: Some(1),
             signal: None,
-            at: chrono::Utc::now(),
+            at: jiff::Timestamp::now(),
         };
         for (exit, death) in [
             (Some(failing), DeathObservation::Alive),
@@ -346,7 +346,7 @@ mod tests {
     }
 
     use super::*;
-    use chrono::Utc;
+    use jiff::Timestamp;
     use serde_json::json;
     use taskfleet_core::{Kind, NodeId, RunId, Status};
 
@@ -376,7 +376,7 @@ mod tests {
             supervisor_pid: None,
             children: vec![],
             started_at: None,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
             last_report: report,
             last_processed_report_seq_by_child: serde_json::Map::new(),
             retry_attempts: 0,
@@ -646,17 +646,17 @@ mod tests {
         let clean = WorkerExit {
             code: Some(0),
             signal: None,
-            at: Utc::now(),
+            at: Timestamp::now(),
         };
         let nonzero = WorkerExit {
             code: Some(2),
             signal: None,
-            at: Utc::now(),
+            at: Timestamp::now(),
         };
         let killed = WorkerExit {
             code: None,
             signal: Some(9),
-            at: Utc::now(),
+            at: Timestamp::now(),
         };
 
         // Told failure -> WorkerFailed regardless of death observation.

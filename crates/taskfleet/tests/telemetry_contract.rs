@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
@@ -377,7 +377,8 @@ fn published_contract_pins_the_public_boundary() {
 #[test]
 fn endpoint_fixtures_execute_against_the_exact_public_command() {
     let contract = contract();
-    let freshness = Duration::milliseconds(contract["timing"]["freshness_ms"].as_i64().unwrap());
+    let freshness =
+        SignedDuration::from_millis(contract["timing"]["freshness_ms"].as_i64().unwrap());
     for case in fixtures()["endpoint_cases"].as_array().unwrap() {
         let id = case["id"].as_str().unwrap();
         let home = TempDir::new().unwrap();
@@ -427,12 +428,12 @@ fn endpoint_fixtures_execute_against_the_exact_public_command() {
             assert_eq!(envelope["data"]["node_id"], "n-0001", "{id}");
             assert_eq!(envelope["data"]["attempt"], request["attempt"], "{id}");
             assert_eq!(envelope["warnings"], json!([]), "{id}");
-            let received: DateTime<Utc> = envelope["data"]["received_at"]
+            let received: Timestamp = envelope["data"]["received_at"]
                 .as_str()
                 .unwrap()
                 .parse()
                 .unwrap();
-            let expires: DateTime<Utc> = envelope["data"]["expires_at"]
+            let expires: Timestamp = envelope["data"]["expires_at"]
                 .as_str()
                 .unwrap()
                 .parse()

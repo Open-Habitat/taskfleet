@@ -178,7 +178,7 @@ impl TmuxConfig {
                 "tmux.persistent requires tmux.completed_window_ttl",
             )
         })?;
-        let ttl = humantime::parse_duration(raw_ttl).map_err(|e| {
+        let ttl = crate::duration::parse(raw_ttl).map_err(|e| {
             CliError::user(
                 "invalid_config",
                 format!("invalid tmux.completed_window_ttl {raw_ttl:?}: {e}"),

@@ -88,7 +88,7 @@ fn classify_worker_with(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
     use taskfleet_core::{Kind, NodeId, RunId, Status};
 
     fn node(exit: bool) -> Node {
@@ -111,19 +111,19 @@ mod tests {
             retained_display: None,
             retention_unavailable: None,
             agent_pid: Some(42),
-            agent_pid_start_time: Some(Utc.timestamp_opt(100, 0).unwrap()),
+            agent_pid_start_time: Some(jiff::Timestamp::new(100, 0).unwrap()),
             agent_pid_start_identity: None,
             supervisor_pid: None,
             children: vec![],
             started_at: None,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
             last_report: None,
             last_processed_report_seq_by_child: serde_json::Map::new(),
             retry_attempts: 0,
             worker_exit: exit.then(|| taskfleet_core::WorkerExit {
                 code: Some(0),
                 signal: None,
-                at: Utc::now(),
+                at: Timestamp::now(),
             }),
             pending_merge: None,
             first_death_at: None,

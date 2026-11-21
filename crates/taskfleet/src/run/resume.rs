@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::json;
 use taskfleet_core::{
@@ -90,7 +90,7 @@ pub struct Resumed {
     pub rebase: RebaseOutcome,
     pub worktree_recreated: bool,
     pub agent_pid: i64,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
 }
 
 fn git_err(code: &'static str) -> impl Fn(String) -> CliError {
@@ -426,7 +426,7 @@ pub(crate) fn resume(
         }
     };
 
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let data = json!({
         "attempt": attempt,
         "message_id": message_id,
@@ -453,10 +453,11 @@ pub(crate) fn resume(
             .or(outcome.pi_session_cwd.clone()),
         "claude_session_id": launcher.claude_session_id(),
         "agent_pid": outcome.agent_pid_hint,
-        "agent_pid_start_time": DateTime::<Utc>::from_timestamp(
+        "agent_pid_start_time": Timestamp::new(
             i64::try_from(outcome.agent_start_time).unwrap_or(i64::MAX),
-            0,
-        ),
+             0,
+        )
+        .ok(),
         "agent_pid_start_identity": outcome.agent_start_identity,
     });
     let appended = (|| -> Result<(), CliError> {

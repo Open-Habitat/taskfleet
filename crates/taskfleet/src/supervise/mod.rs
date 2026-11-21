@@ -38,8 +38,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
 use clap::Args as ClapArgs;
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::{info, warn};
@@ -1149,8 +1149,7 @@ pub fn dispatch(
         if !spawn_failed_terminal {
             let unlocked = read_manifest_opt(&paths).ok().flatten();
             let old_enough = |m: &taskfleet_core::Manifest| {
-                (Utc::now() - m.created_at)
-                    .to_std()
+                std::time::Duration::try_from(Timestamp::now().duration_since(m.created_at))
                     .is_ok_and(|age| age >= no_worker_grace())
             };
             let candidate = unlocked.as_ref().is_some_and(|m| {
@@ -2143,7 +2142,7 @@ fn report_corrupt_line(
 
     if quarantine {
         // Filename-safe basic-ISO stamp (no colons) for the `.bak` sibling.
-        let ts = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+        let ts = Timestamp::now().strftime("%Y%m%dT%H%M%SZ").to_string();
         match taskfleet_core::quarantine_corrupt_lines(log_owner, &ts) {
             Ok(Some(q)) => {
                 // The corrupt bytes are gone and every offset shifted: re-read
@@ -2328,15 +2327,11 @@ fn spawn_grace() -> Duration {
 /// went backwards (`now < started_at`) is also treated as in-grace — the
 /// node cannot be older than its own creation, so the conservative read is
 /// "too fresh to judge".
-fn within_spawn_grace(
-    started_at: Option<DateTime<Utc>>,
-    now: DateTime<Utc>,
-    grace: Duration,
-) -> bool {
+fn within_spawn_grace(started_at: Option<Timestamp>, now: Timestamp, grace: Duration) -> bool {
     let Some(started_at) = started_at else {
         return false;
     };
-    match (now - started_at).to_std() {
+    match std::time::Duration::try_from(now.duration_since(started_at)) {
         // `to_std` succeeds only for a non-negative delta; a node younger
         // than `grace` is still in the window.
         Ok(age) => age < grace,
@@ -2714,7 +2709,7 @@ struct RespawnOutcome {
     pi_session_path: Option<String>,
     pi_session_cwd: Option<String>,
     agent_pid: i64,
-    agent_pid_start_time: Option<DateTime<Utc>>,
+    agent_pid_start_time: Option<Timestamp>,
     agent_pid_start_identity: String,
     materialization: Option<crate::run::spawn::SpawnOutcome>,
 }
@@ -2844,10 +2839,11 @@ fn respawn_agent(
         pi_session_path: outcome.pi_session_path.clone(),
         pi_session_cwd: outcome.pi_session_cwd.clone(),
         agent_pid: outcome.agent_pid_hint,
-        agent_pid_start_time: DateTime::<Utc>::from_timestamp(
+        agent_pid_start_time: Timestamp::new(
             i64::try_from(outcome.agent_start_time).unwrap_or(i64::MAX),
             0,
-        ),
+        )
+        .ok(),
         agent_pid_start_identity: outcome.agent_start_identity.clone(),
         materialization: Some(outcome),
     })
@@ -3027,7 +3023,7 @@ fn synthesize_worker_exit_failure(paths: &RunPaths, nid: &NodeId, node_id: &str,
         }
         // When the worker actually exited (vs. when the supervisor noticed) — the
         // told fact's own timestamp, useful for forensics.
-        obj.insert("worker_exited_at".to_string(), json!(exit.at.to_rfc3339()));
+        obj.insert("worker_exited_at".to_string(), json!(exit.at.to_string()));
     }
     // Typed provenance (issue `typed-report-origin`): a supervisor-synthesized
     // told-exit failure.
@@ -3346,7 +3342,7 @@ fn watchdog_tick(
         return Ok(());
     }
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     let now_instant = Instant::now();
     let grace = spawn_grace();
     let death_grace = death_grace();
@@ -3501,13 +3497,14 @@ fn watchdog_tick(
             // a non-zero grace the first observation is always within-grace and is
             // recorded + deferred below.
             let anchor = n.first_death_at.unwrap_or(now);
-            // Compare in signed `chrono::Duration` so a BACKWARD wall-clock step
+            // Compare in signed `jiff::SignedDuration` so a BACKWARD wall-clock step
             // (`now < anchor`) reads as negative elapsed → still within grace,
             // never a spurious immediate fire. (`Duration::to_std()` errors on a
             // negative span and `unwrap_or_default()` would collapse it to zero,
             // firing the backstop with no grace — the bug this avoids.)
-            let elapsed = now.signed_duration_since(anchor);
-            let grace = chrono::Duration::from_std(death_grace).unwrap_or(chrono::Duration::MAX);
+            let elapsed = now.duration_since(anchor);
+            let grace =
+                jiff::SignedDuration::try_from(death_grace).unwrap_or(jiff::SignedDuration::MAX);
             if elapsed >= grace {
                 outcome::DeathObservation::DeadGraceElapsed
             } else {
@@ -3658,34 +3655,34 @@ mod tests {
     #[test]
     fn within_spawn_grace_boundaries() {
         let grace = Duration::from_secs(5);
-        let created = "2026-06-28T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        let created = "2026-06-28T12:00:00Z".parse::<Timestamp>().unwrap();
 
         // Fresh: 1s old, well inside the 5s window → in-grace.
-        let now = created + chrono::Duration::seconds(1);
+        let now = created + jiff::SignedDuration::from_secs(1);
         assert!(within_spawn_grace(Some(created), now, grace));
 
         // Just under the boundary (4.999s) → still in-grace.
-        let now = created + chrono::Duration::milliseconds(4_999);
+        let now = created + jiff::SignedDuration::from_millis(4_999);
         assert!(within_spawn_grace(Some(created), now, grace));
 
         // Exactly at the boundary (5s) → eligible (age < grace is strict).
-        let now = created + chrono::Duration::seconds(5);
+        let now = created + jiff::SignedDuration::from_secs(5);
         assert!(!within_spawn_grace(Some(created), now, grace));
 
         // Well past the window → eligible.
-        let now = created + chrono::Duration::seconds(60);
+        let now = created + jiff::SignedDuration::from_secs(60);
         assert!(!within_spawn_grace(Some(created), now, grace));
 
         // No started_at → eligible (cannot prove freshness).
-        let now = created + chrono::Duration::seconds(1);
+        let now = created + jiff::SignedDuration::from_secs(1);
         assert!(!within_spawn_grace(None, now, grace));
 
         // Clock ran backwards (now before creation) → conservatively in-grace.
-        let now = created - chrono::Duration::seconds(1);
+        let now = created - jiff::SignedDuration::from_secs(1);
         assert!(within_spawn_grace(Some(created), now, grace));
 
         // A zero grace disables suppression for any known-age node.
-        let now = created + chrono::Duration::milliseconds(1);
+        let now = created + jiff::SignedDuration::from_millis(1);
         assert!(!within_spawn_grace(Some(created), now, Duration::ZERO));
     }
 
@@ -3867,7 +3864,7 @@ mod tests {
             supervisor_pid: None,
             children: Vec::new(),
             started_at: None,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
             last_report: None,
             last_processed_report_seq_by_child: serde_json::Map::default(),
             retry_attempts: 0,

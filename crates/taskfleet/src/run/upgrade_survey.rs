@@ -638,7 +638,7 @@ pub(super) fn move_aside(
     }
     let record = serde_json::json!({
         "creation_id": id,
-        "abandoned_at": chrono::Utc::now(),
+        "abandoned_at": jiff::Timestamp::now(),
         "receipt_id": receipt_id,
         "taskfleet_version": env!("CARGO_PKG_VERSION"),
         "evidence": evidence,

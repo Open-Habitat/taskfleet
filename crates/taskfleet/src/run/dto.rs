@@ -15,7 +15,7 @@
 //! [`crate::run`] so a new enum variant is a compile error here, not a
 //! silent wire change.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 
 use taskfleet_core::{Manifest, NodeId, RunId, RunPaths};
@@ -195,8 +195,8 @@ pub struct ManifestView<'a> {
     pub caller_settlement_intent: Option<&'a taskfleet_core::schema::CallerSettlementIntent>,
     pub title: &'a str,
     pub status: &'static str,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
     pub source_repo: Option<&'a str>,
     pub source_branch: Option<&'a str>,
     pub worktree_root: Option<&'a str>,
@@ -270,7 +270,7 @@ pub struct RunSummary {
     pub agent_owner: Option<&'static str>,
     pub status: String,
     pub title: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// Source repository recorded at run creation. This is durable provenance,
     /// not a title/path guess; legacy or skeleton runs may legitimately carry
     /// `null` when no repository identity was recorded.
@@ -507,7 +507,7 @@ mod tests {
     use serde_json::json;
     use taskfleet_core::{Kind, Lifecycle, Status};
 
-    fn ts() -> DateTime<Utc> {
+    fn ts() -> Timestamp {
         "2024-01-01T00:00:00Z".parse().unwrap()
     }
 
@@ -656,7 +656,7 @@ mod tests {
     fn attention_view_flattens_onto_summary() {
         use crate::run::attention::AttentionView;
         use taskfleet_core::WorkerExit;
-        let now: DateTime<Utc> = "2024-01-01T00:10:00Z".parse().unwrap();
+        let now: Timestamp = "2024-01-01T00:10:00Z".parse().unwrap();
         let exit = WorkerExit {
             code: Some(0),
             signal: None,

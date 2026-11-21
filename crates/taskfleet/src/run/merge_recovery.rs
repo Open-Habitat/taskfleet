@@ -52,7 +52,7 @@
 //! this classify and the append — is not defended; and the orphan-child window is
 //! bounded, not closed.
 
-use chrono::{Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::{json, Value};
 
 use taskfleet_core::report::validate_report_payload;
@@ -697,7 +697,8 @@ fn driver_is_alive(txn: &MergeTxn) -> bool {
     }
     // No identity to rule out PID reuse — trust the bare-PID liveness only within a
     // bounded window anchored to the transaction's own start.
-    Utc::now().signed_duration_since(txn.started_at) < Duration::minutes(DRIVER_STALE_AFTER_MINS)
+    Timestamp::now().duration_since(txn.started_at)
+        < SignedDuration::from_mins(DRIVER_STALE_AFTER_MINS)
 }
 
 /// Append the `merge.aborted` event that resolves (clears) transaction `op_id`,

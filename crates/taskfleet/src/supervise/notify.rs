@@ -179,7 +179,7 @@ pub fn maybe_fire_awaiting_input(
     let Some(cmd) = notify_cmd else {
         return true;
     };
-    if !crate::run::awaiting_input::is_escalated(candidate.opened_at, chrono::Utc::now()) {
+    if !crate::run::awaiting_input::is_escalated(candidate.opened_at, jiff::Timestamp::now()) {
         // Not settled: caller must keep this generation eligible on later ticks.
         return false;
     }
@@ -217,7 +217,7 @@ pub fn maybe_fire_awaiting_input(
     let Some(fresh) = fresh.filter(|v| v.event_seq == candidate.event_seq) else {
         return true;
     };
-    if !crate::run::awaiting_input::is_escalated(fresh.opened_at, chrono::Utc::now()) {
+    if !crate::run::awaiting_input::is_escalated(fresh.opened_at, jiff::Timestamp::now()) {
         return true;
     }
     let key = format!("supervisor-awaiting-input:{run_id}:{}", fresh.event_seq);
@@ -647,7 +647,7 @@ mod tests {
         // This fixture has no concurrent writer and its applied_seq is current.
         let mut node = read_node_opt(&paths, &nid).unwrap().unwrap();
         node.awaiting_input.as_mut().unwrap().opened_at =
-            chrono::Utc::now() - chrono::Duration::minutes(4);
+            jiff::Timestamp::now() - jiff::SignedDuration::from_mins(4);
         write_node(&paths, &node).unwrap();
         let open = node.awaiting_input.unwrap();
         let out = tmp.path().join("awaiting.txt");

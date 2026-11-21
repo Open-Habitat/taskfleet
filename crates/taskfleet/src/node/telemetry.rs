@@ -55,8 +55,8 @@ struct UpdatePayload {
     run_id: taskfleet_core::RunId,
     node_id: taskfleet_core::NodeId,
     attempt: u32,
-    received_at: chrono::DateTime<chrono::Utc>,
-    expires_at: chrono::DateTime<chrono::Utc>,
+    received_at: jiff::Timestamp,
+    expires_at: jiff::Timestamp,
 }
 
 pub fn update(args: Args<'_>) -> Result<(), CliError> {

@@ -140,7 +140,7 @@ fn projected_paths(
     // touches, so a synthetic envelope is sufficient to ask the reducer for the
     // plan; the real seq/ts are stamped by the append path when (and if) we write.
     let ev = Event {
-        ts: chrono::Utc::now(),
+        ts: jiff::Timestamp::now(),
         seq: 0,
         kind: kind.to_string(),
         run_id: paths.run_id.clone(),

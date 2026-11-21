@@ -48,7 +48,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -1450,7 +1450,7 @@ pub(crate) fn record_merge_start(
         driver_pid: Some(pid as i32),
         driver_pid_start_secs: crate::supervise::watchdog::pid_start_time(pid),
         driver_pid_start_identity: crate::supervise::watchdog::pid_start_identity(pid),
-        started_at: Utc::now(),
+        started_at: Timestamp::now(),
         caller_authority: caller.map(|c| CallerMergeLink {
             intent_seq: c.intent.seq,
             intent_key: c.intent.key.clone(),

@@ -17,7 +17,7 @@
 //! so a new enum variant is a compile error here, not a silent wire
 //! change.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -46,11 +46,11 @@ pub struct NodeView<'a> {
     pub tmux_window: Option<&'a str>,
     pub tmux_identity: Option<&'a TmuxIdentity>,
     pub agent_pid: Option<i32>,
-    pub agent_pid_start_time: Option<DateTime<Utc>>,
+    pub agent_pid_start_time: Option<Timestamp>,
     pub supervisor_pid: Option<i32>,
     pub children: &'a [ChildRef],
-    pub started_at: Option<DateTime<Utc>>,
-    pub updated_at: DateTime<Utc>,
+    pub started_at: Option<Timestamp>,
+    pub updated_at: Timestamp,
     /// Projection-native report field. Kept for backwards compatibility with
     /// callers that already read the on-disk-shaped wire view.
     pub last_report: &'a Option<Value>,
@@ -101,7 +101,7 @@ pub struct NodeSummary {
     pub kind: String,
     pub status: String,
     pub parent_node_id: Option<String>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     pub children: u32,
 }
 
@@ -124,7 +124,7 @@ mod tests {
     use serde_json::{json, Map};
     use taskfleet_core::{Kind, Status};
 
-    fn ts() -> DateTime<Utc> {
+    fn ts() -> Timestamp {
         "2024-01-01T00:00:00Z".parse().unwrap()
     }
 

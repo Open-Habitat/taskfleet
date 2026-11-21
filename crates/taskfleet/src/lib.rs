@@ -6,6 +6,7 @@ mod cli;
 // layer of the flag > env > file > default precedence (AGENTS-AI-FIRST-CLI §8).
 mod config;
 mod doctor;
+mod duration;
 mod error;
 mod event;
 mod git;

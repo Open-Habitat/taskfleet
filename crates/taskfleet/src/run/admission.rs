@@ -182,7 +182,7 @@ struct PredecessorExecutable {
 #[derive(Serialize)]
 struct Receipt<'a> {
     receipt_id: &'a str,
-    created_at: chrono::DateTime<chrono::Utc>,
+    created_at: jiff::Timestamp,
     taskfleet_version: &'static str,
     mode: &'static str,
     activation_program: &'a str,
@@ -364,7 +364,7 @@ pub(super) fn upgrade(
             &root,
             &Receipt {
                 receipt_id: &receipt_id,
-                created_at: chrono::Utc::now(),
+                created_at: jiff::Timestamp::now(),
                 taskfleet_version: env!("CARGO_PKG_VERSION"),
                 mode: if recover { "recover" } else { "activate" },
                 activation_program: &args.argv[0],

@@ -10,7 +10,7 @@
 //! run is still `pending`; the flag only says "pending, but visibly not
 //! progressing".
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 
 use taskfleet_core::Status;
 
@@ -68,8 +68,8 @@ pub fn is_stillborn(
     run_status: Status,
     supervisor_alive: bool,
     node_count: u32,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    created_at: Timestamp,
+    updated_at: Timestamp,
 ) -> bool {
     run_status == Status::Pending
         && !supervisor_alive
@@ -85,7 +85,7 @@ pub fn is_stillborn(
 /// reattach/restart handoff (its pid file momentarily reads dead while the
 /// manifest clock is still fresh) is never misjudged; short enough to catch a
 /// genuinely stranded run well inside a caller's default 6h `run wait` timeout.
-pub const ORPHAN_GRACE: Duration = Duration::minutes(15);
+pub const ORPHAN_GRACE: SignedDuration = SignedDuration::from_mins(15);
 
 /// Detect an *orphaned* run: its supervisor created ≥1 worker node and then died
 /// mid-run, leaving the run `pending`/`running` with no actor able to roll it up
@@ -138,13 +138,13 @@ pub fn is_orphaned(
     run_status: Status,
     supervisor_alive: bool,
     node_count: u32,
-    updated_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    updated_at: Timestamp,
+    now: Timestamp,
 ) -> bool {
     matches!(run_status, Status::Pending | Status::Running)
         && !supervisor_alive
         && node_count > 0
-        && now.signed_duration_since(updated_at) > ORPHAN_GRACE
+        && now.duration_since(updated_at) > ORPHAN_GRACE
 }
 
 /// Which read-time "cannot progress on its own" shape a run matches, if any.
@@ -179,9 +179,9 @@ pub fn stall_kind(
     run_status: Status,
     supervisor_alive: bool,
     node_count: u32,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    created_at: Timestamp,
+    updated_at: Timestamp,
+    now: Timestamp,
 ) -> Option<StallKind> {
     if is_stillborn(
         run_status,
@@ -202,11 +202,11 @@ pub fn stall_kind(
 mod tests {
     use super::*;
 
-    fn now() -> DateTime<Utc> {
+    fn now() -> Timestamp {
         "2026-08-06T12:00:00Z".parse().unwrap()
     }
 
-    fn created() -> DateTime<Utc> {
+    fn created() -> Timestamp {
         "2026-08-06T11:00:00Z".parse().unwrap()
     }
 
@@ -253,7 +253,7 @@ mod tests {
     /// supervisor did something before dying — not the never-started shape.
     #[test]
     fn forward_progress_is_not_stillborn() {
-        let updated = created() + Duration::seconds(1);
+        let updated = created() + SignedDuration::from_secs(1);
         assert!(!is_stillborn(Status::Pending, false, 0, created(), updated));
     }
 
@@ -282,7 +282,7 @@ mod tests {
     /// "supervisor died mid-run, work stranded" shape (issue `run-wait-still`).
     #[test]
     fn pending_dead_supervisor_past_grace_is_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::seconds(1);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_secs(1);
         assert!(is_orphaned(Status::Pending, false, 1, idle, now()));
     }
 
@@ -290,7 +290,7 @@ mod tests {
     /// orphaned by the same logic — the issue scopes in both pending and running.
     #[test]
     fn running_dead_supervisor_past_grace_is_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::minutes(30);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_mins(30);
         assert!(is_orphaned(Status::Running, false, 3, idle, now()));
     }
 
@@ -301,7 +301,7 @@ mod tests {
     /// pending run) keeps blocking rather than settling early.
     #[test]
     fn recently_active_dead_supervisor_is_not_orphaned() {
-        let recent = now() - Duration::minutes(1);
+        let recent = now() - SignedDuration::from_mins(1);
         assert!(!is_orphaned(Status::Pending, false, 1, recent, now()));
     }
 
@@ -318,7 +318,7 @@ mod tests {
     /// with nodes" shape, however long it has been idle.
     #[test]
     fn alive_supervisor_is_never_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::hours(2);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_hours(2);
         assert!(!is_orphaned(Status::Pending, true, 1, idle, now()));
     }
 
@@ -326,7 +326,7 @@ mod tests {
     /// must not fire on it (they are mutually exclusive on `node_count`).
     #[test]
     fn zero_nodes_is_not_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::hours(1);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_hours(1);
         assert!(!is_orphaned(Status::Pending, false, 0, idle, now()));
     }
 
@@ -335,7 +335,7 @@ mod tests {
     /// supervisor.
     #[test]
     fn terminal_or_blocked_run_is_not_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::hours(1);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_hours(1);
         for s in [
             Status::Blocked,
             Status::Done,
@@ -364,7 +364,7 @@ mod tests {
     /// `Orphaned`.
     #[test]
     fn stall_kind_classifies_orphaned() {
-        let idle = now() - ORPHAN_GRACE - Duration::seconds(1);
+        let idle = now() - ORPHAN_GRACE - SignedDuration::from_secs(1);
         assert_eq!(
             stall_kind(Status::Pending, false, 1, created(), idle, now()),
             Some(StallKind::Orphaned)
@@ -380,7 +380,7 @@ mod tests {
             None
         );
         // Dead supervisor but within the grace window: transient, not yet judged.
-        let recent = now() - Duration::minutes(1);
+        let recent = now() - SignedDuration::from_mins(1);
         assert_eq!(
             stall_kind(Status::Pending, false, 1, created(), recent, now()),
             None

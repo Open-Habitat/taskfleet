@@ -838,7 +838,7 @@ mod tests {
         node.worker_exit = None;
         node.agent_pid = Some(pid as i32);
         node.agent_pid_start_time = crate::supervise::watchdog::pid_start_time(pid)
-            .and_then(|seconds| chrono::DateTime::from_timestamp(seconds as i64, 0));
+            .and_then(|seconds| jiff::Timestamp::new(seconds as i64, 0).ok());
         node.agent_pid_start_identity = crate::supervise::watchdog::pid_start_identity(pid);
         std::thread::sleep(std::time::Duration::from_millis(30));
         let tmux = tmux_script(&tmp, "printf 'FINAL AFTER TERM\\n'");

@@ -24,11 +24,10 @@ taskfleet-core = { path = "../taskfleet-core", version = "=0.20.0" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
-humantime = { workspace = true }
 tempfile = { workspace = true }
 ctrlc = { workspace = true }
 sha2 = { workspace = true }

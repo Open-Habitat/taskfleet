@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use chrono::{Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -256,7 +256,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 }
                 let root = crate::home::root_dir()?;
                 if let ExistingReservation::Published(dir) =
-                    classify_existing_reservation(&root, &existing, Utc::now())?
+                    classify_existing_reservation(&root, &existing, Timestamp::now())?
                 {
                     repair_parent_child_publication(&root, &dir)?;
                     let existing_id = parse_run_id(&existing.run_id)?;
@@ -474,7 +474,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         let creator = idempotency::CreatorLease {
             pid: std::process::id(),
             pid_start_secs: crate::supervise::watchdog::pid_start_time(std::process::id()),
-            started_at: Utc::now(),
+            started_at: Timestamp::now(),
             materializer_lease_path: Some(lease.path().display().to_string()),
         };
         materializer_lease = Some(lease);
@@ -501,7 +501,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                     ),
                 ));
             }
-            match classify_existing_reservation(&root, &existing, Utc::now())? {
+            match classify_existing_reservation(&root, &existing, Timestamp::now())? {
                 ExistingReservation::Published(dir) => {
                     repair_parent_child_publication(&root, &dir)?;
                     let existing_id = parse_run_id(&existing.run_id)?;
@@ -576,7 +576,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                             break;
                         };
                         if !matches!(
-                            classify_existing_reservation(&root, &current, Utc::now())?,
+                            classify_existing_reservation(&root, &current, Timestamp::now())?,
                             ExistingReservation::CreatorLive
                         ) {
                             observed = Some(current);
@@ -1066,10 +1066,11 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         "claude_session_id": agent_launcher.claude_session_id(),
         "attempt": 0,
         "agent_pid": outcome.agent_pid_hint,
-        "agent_pid_start_time": chrono::DateTime::<Utc>::from_timestamp(
+        "agent_pid_start_time": jiff::Timestamp::new(
             i64::try_from(outcome.agent_start_time).unwrap_or(i64::MAX),
-            0,
-        ),
+             0,
+        )
+        .ok(),
         "agent_pid_start_identity": outcome.agent_start_identity,
         "task": args.task,
         "parent_node_id": parent_node_id,
@@ -1161,7 +1162,7 @@ enum ExistingReservation {
 fn classify_existing_reservation(
     root: &std::path::Path,
     record: &idempotency::ReservationRecord,
-    now: chrono::DateTime<Utc>,
+    now: jiff::Timestamp,
 ) -> Result<ExistingReservation, CliError> {
     classify_existing_reservation_with(root, record, now, |pid, start| {
         crate::supervise::pid_file::pid_live_with_identity(
@@ -1174,7 +1175,7 @@ fn classify_existing_reservation(
 fn classify_existing_reservation_with(
     root: &std::path::Path,
     record: &idempotency::ReservationRecord,
-    now: chrono::DateTime<Utc>,
+    now: jiff::Timestamp,
     owner_live: impl FnOnce(u32, Option<u64>) -> bool,
 ) -> Result<ExistingReservation, CliError> {
     let run_id = parse_run_id(&record.run_id)?;
@@ -1204,8 +1205,8 @@ fn classify_existing_reservation_with(
         (false, _) => Ok(ExistingReservation::CreatorDead),
         (true, Some(_)) => Ok(ExistingReservation::CreatorLive),
         (true, None)
-            if now.signed_duration_since(creator.started_at)
-                < Duration::minutes(CREATOR_WITHOUT_IDENTITY_STALE_AFTER_MINS) =>
+            if now.duration_since(creator.started_at)
+                < SignedDuration::from_mins(CREATOR_WITHOUT_IDENTITY_STALE_AFTER_MINS) =>
         {
             Ok(ExistingReservation::CreatorLive)
         }
@@ -1837,7 +1838,7 @@ mod tests {
     #[test]
     fn dead_creator_reservation_is_reclaimable_without_waiting() {
         let root = tempfile::TempDir::new().unwrap();
-        let started = Utc::now();
+        let started = Timestamp::now();
         let record = idempotency::ReservationRecord::new(
             "01jxsnap000000000000000000",
             idempotency::CreatorLease {
@@ -1860,7 +1861,7 @@ mod tests {
     #[test]
     fn live_creator_reservation_is_never_reclaimed() {
         let root = tempfile::TempDir::new().unwrap();
-        let started = Utc::now();
+        let started = Timestamp::now();
         let record = idempotency::ReservationRecord::new(
             "01jxsnap000000000000000000",
             idempotency::CreatorLease {
@@ -1879,7 +1880,7 @@ mod tests {
     #[test]
     fn stale_live_pid_without_start_identity_fails_closed() {
         let root = tempfile::TempDir::new().unwrap();
-        let started = Utc::now() - Duration::minutes(31);
+        let started = Timestamp::now() - SignedDuration::from_mins(31);
         let record = idempotency::ReservationRecord::new(
             "01jxsnap000000000000000000",
             idempotency::CreatorLease {
@@ -1890,7 +1891,7 @@ mod tests {
             },
         );
         assert_eq!(
-            classify_existing_reservation_with(root.path(), &record, Utc::now(), |_, _| true)
+            classify_existing_reservation_with(root.path(), &record, Timestamp::now(), |_, _| true)
                 .unwrap(),
             ExistingReservation::Unverifiable
         );
@@ -1899,7 +1900,7 @@ mod tests {
     #[test]
     fn published_reservation_replays_even_when_creator_is_dead() {
         let root = tempfile::TempDir::new().unwrap();
-        let started = Utc::now();
+        let started = Timestamp::now();
         let record = idempotency::ReservationRecord::new(
             "01jxsnap000000000000000000",
             idempotency::CreatorLease {

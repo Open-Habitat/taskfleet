@@ -226,9 +226,8 @@ fn snapshot(name: &str, value: &str, dynamic: &[(String, &'static str)]) {
     // git HEAD hash (`version.commit`).
     settings.add_filter(r"\b[0-9a-f]{40}\b", "[COMMIT]");
     // Timestamps in every serialised form we emit:
-    //   RFC3339 `…Z`              (manifest/json)
-    //   RFC3339 `…+00:00`         (event tail jsonl/text)
-    //   `YYYY-MM-DD HH:MM:SS… UTC` (chrono Display in text mode)
+    //   RFC3339 `…Z` (every surface since the jiff migration); the offset
+    //   and ` UTC` alternatives keep matching the pre-jiff chrono forms.
     settings.add_filter(
         r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2}| UTC)",
         "[TS]",

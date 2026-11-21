@@ -324,7 +324,7 @@ struct WaitData {
 #[derive(Serialize)]
 struct ProgressEvidence {
     run_age_secs: i64,
-    node_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    node_updated_at: Option<jiff::Timestamp>,
     attempt: Option<u32>,
     prompt_signal: &'static str,
     telemetry: Option<taskfleet_core::TelemetryView>,
@@ -347,9 +347,9 @@ fn progress_evidence(paths: &RunPaths) -> Result<ProgressEvidence, CliError> {
         Err(e) => (None, Some(e.to_string())),
     };
     Ok(ProgressEvidence {
-        run_age_secs: chrono::Utc::now()
-            .signed_duration_since(manifest.created_at)
-            .num_seconds()
+        run_age_secs: jiff::Timestamp::now()
+            .duration_since(manifest.created_at)
+            .as_secs()
             .max(0),
         node_updated_at: node.as_ref().map(|n| n.updated_at),
         attempt: node.as_ref().map(|n| n.retry_attempts),
@@ -540,7 +540,7 @@ fn wait_loop(
         // the same `now` (rather than a per-run drift as the loop walks the
         // list). Passed into `current_settle` so the settle predicate stays
         // deterministic and test-injectable through `stall_kind`.
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         for (i, (run_id, paths)) in runs.iter().enumerate() {
             let settle = current_settle(paths, now)?.ok_or_else(|| {
                 // A run dir validated at entry but its manifest vanished
@@ -723,10 +723,7 @@ struct LatchedSettle {
 /// manifest (the pid file is removed without the lock, and process death is
 /// unsynchronized). The probe is read here so it is as fresh as the manifest it
 /// sits beside — a best-effort point-in-time hint, not a welded pairing.
-fn current_settle(
-    paths: &RunPaths,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<Option<Settle>, CliError> {
+fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settle>, CliError> {
     RunLock::with_shared_lock(&paths.lock(), || {
         let Some(m) = read_manifest_opt(paths)? else {
             return Ok(None);
@@ -1000,7 +997,7 @@ fn read_outcome(
                     .attention_reason
                     .unwrap_or(crate::run::attention::ATTENTION_REASON),
                 paths.run_id.as_str(),
-                chrono::Utc::now(),
+                jiff::Timestamp::now(),
                 exit,
                 git_inputs.agent_pid,
                 git_inputs.worktree_path.clone(),
@@ -1017,8 +1014,9 @@ fn read_outcome(
     // supervisor only ever stamps it on the failed-synthesis path, so a block on
     // a `done`/`cancelled` report is stale or spoofed and must not be surfaced (a
     // regular agent report can carry unknown fields — the validator permits them).
-    let awaiting_input_detail = open
-        .map(|open| crate::run::awaiting_input::AwaitingInputView::build(open, chrono::Utc::now()));
+    let awaiting_input_detail = open.map(|open| {
+        crate::run::awaiting_input::AwaitingInputView::build(open, jiff::Timestamp::now())
+    });
     let recoverable_work = if matches!(status, Status::Failed) {
         report
             .as_ref()
@@ -1294,7 +1292,7 @@ pub fn parse_check_in(s: &str) -> Result<Duration, String> {
 ///
 /// A **bare unsigned integer** (all ASCII digits, e.g. `2400`) is interpreted
 /// as **seconds** — so `--timeout 2400` == `--timeout 2400sec`. This closes a
-/// silent-instant-exit trap: `humantime` alone rejects a unit-less integer, and
+/// silent-instant-exit trap: the unit-aware parser alone rejects a unit-less integer, and
 /// a backgrounded `run wait` that exits on that error looks "completed" to the
 /// wrapping shell (exit 0) even though it never waited. Any value carrying a
 /// unit falls through to the existing unit-aware parse unchanged.
@@ -1303,10 +1301,10 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     // Bare integer → seconds. Gate on an explicit all-ASCII-digits check rather
     // than trusting `u64::from_str`: the latter also accepts a leading `+`
     // (`+30`), which would diverge from the unit-bearing form (`+30s`, which
-    // humantime rejects) and from the "unit-less integer" grammar we advertise.
+    // the unit-aware parser rejects) and from the "unit-less integer" grammar we advertise.
     // A digit-only string that overflows `u64` is still unambiguously a bare
     // count, so report the range explicitly instead of letting it fall through
-    // to a confusing "time unit needed" from humantime.
+    // to a confusing "time unit needed" from the unit-aware parser.
     if !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit()) {
         let secs = trimmed
             .parse::<u64>()
@@ -1316,7 +1314,7 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     // Anything with a unit (or otherwise non-numeric) defers to the unit-aware
     // parse. Use `trimmed` so surrounding whitespace is normalized on both
     // paths, not just the bare-integer one.
-    humantime::parse_duration(trimmed).map_err(|e| format!("invalid duration '{s}': {e}"))
+    crate::duration::parse(trimmed).map_err(|e| format!("invalid duration '{s}': {e}"))
 }
 
 #[cfg(test)]
@@ -1375,7 +1373,7 @@ mod tests {
     #[test]
     fn parse_duration_bare_integer_overflow_is_a_clear_error() {
         // Digit-only but > u64::MAX: report the range explicitly rather than
-        // deferring to humantime's misleading "time unit needed".
+        // deferring to the unit-aware parser's misleading "time unit needed".
         let err = parse_duration("18446744073709551616").unwrap_err();
         assert!(err.contains("bare seconds exceed"), "got: {err}");
     }

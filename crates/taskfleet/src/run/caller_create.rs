@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use chrono::Utc;
+use jiff::Timestamp;
 use serde_json::json;
 use taskfleet_core::{AgentOwner, Kind, Lifecycle, RunId, RunLock};
 
@@ -217,7 +217,7 @@ pub(super) fn run(args: &Args<'_>) -> Result<(), CliError> {
         CreatorLease {
             pid: std::process::id(),
             pid_start_secs: crate::supervise::watchdog::pid_start_time(std::process::id()),
-            started_at: Utc::now(),
+            started_at: Timestamp::now(),
             materializer_lease_path: Some(lease.path().display().to_string()),
         },
     );

@@ -592,13 +592,13 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
     use taskfleet_core::{Kind, Node, RunId, WorkerExit};
 
     /// A minimal `n-0001` node with the pid/exit fields under test set.
     fn node(
         agent_pid: Option<i32>,
-        start_time: Option<DateTime<Utc>>,
+        start_time: Option<Timestamp>,
         exit: Option<WorkerExit>,
     ) -> Node {
         Node {
@@ -625,7 +625,7 @@ mod tests {
             supervisor_pid: None,
             children: vec![],
             started_at: None,
-            updated_at: Utc::now(),
+            updated_at: Timestamp::now(),
             last_report: None,
             last_processed_report_seq_by_child: serde_json::Map::new(),
             retry_attempts: 0,
@@ -655,7 +655,7 @@ mod tests {
         let exit = WorkerExit {
             code: Some(0),
             signal: None,
-            at: Utc::now(),
+            at: Timestamp::now(),
         };
         let n = node(Some(child.id() as i32), None, Some(exit));
         assert_eq!(classify_worker(&n), WorkerState::Exited);
@@ -673,11 +673,11 @@ mod tests {
         let mut child = spawn_sleeper();
         let pid = child.id();
         let st = watchdog::pid_start_time(pid).expect("read child start_time");
-        let recorded = DateTime::from_timestamp(st as i64, 0).unwrap();
+        let recorded = Timestamp::new(st as i64, 0).unwrap();
         let exit = WorkerExit {
             code: Some(0),
             signal: None,
-            at: Utc::now(),
+            at: Timestamp::now(),
         };
         let n = node(Some(pid as i32), Some(recorded), Some(exit));
         assert_eq!(
@@ -722,7 +722,7 @@ mod tests {
         let mut child = spawn_sleeper();
         let pid = child.id();
         let st = watchdog::pid_start_time(pid).expect("read child start_time");
-        let recorded = DateTime::from_timestamp(st as i64, 0).unwrap();
+        let recorded = Timestamp::new(st as i64, 0).unwrap();
 
         assert_eq!(
             classify_worker(&node(Some(pid as i32), Some(recorded), None)),
@@ -733,7 +733,7 @@ mod tests {
             WorkerState::Unverifiable { pid }
         );
         // A recorded start-time that disagrees (1970) → the pid was recycled → Gone.
-        let bogus = DateTime::from_timestamp(1, 0).unwrap();
+        let bogus = Timestamp::new(1, 0).unwrap();
         assert_eq!(
             classify_worker(&node(Some(pid as i32), Some(bogus), None)),
             WorkerState::Gone
@@ -751,7 +751,7 @@ mod tests {
         let mut child = spawn_sleeper();
         let pid = child.id();
         let st = watchdog::pid_start_time(pid).expect("read child start_time");
-        let drifted = DateTime::from_timestamp(st as i64 - 4, 0).unwrap();
+        let drifted = Timestamp::new(st as i64 - 4, 0).unwrap();
         let mut n = node(Some(pid as i32), Some(drifted), None);
         n.agent_pid_start_identity = watchdog::pid_start_identity(pid);
         assert!(n.agent_pid_start_identity.is_some());

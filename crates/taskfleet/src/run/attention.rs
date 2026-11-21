@@ -41,7 +41,7 @@
 //! and does nothing). The told clean-exit fact is the more specific truth, so it
 //! wins.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use taskfleet_core::{Status, WorkerExit};
 
@@ -156,7 +156,7 @@ pub struct AttentionView {
     /// The instant the worker exited (`worker_exit.at`) — the anchor for
     /// [`Self::pending_age_secs`], surfaced so a JSON consumer can compute its own
     /// freshness against its own clock.
-    pub exited_at: DateTime<Utc>,
+    pub exited_at: Timestamp,
     /// The last-observed worker PID (`node.agent_pid`) — the process the shim
     /// wrapped, now exited. Surfaced as evidence of which worker finished; `null`
     /// when the node never recorded a pid.
@@ -184,7 +184,7 @@ impl AttentionView {
     #[must_use]
     pub fn build(
         run_id: &str,
-        now: DateTime<Utc>,
+        now: Timestamp,
         worker_exit: &WorkerExit,
         worker_pid: Option<i32>,
         worktree_path: Option<String>,
@@ -206,14 +206,14 @@ impl AttentionView {
     pub fn build_for(
         reason: &'static str,
         run_id: &str,
-        now: DateTime<Utc>,
+        now: Timestamp,
         worker_exit: &WorkerExit,
         worker_pid: Option<i32>,
         worktree_path: Option<String>,
         source_branch: Option<String>,
     ) -> Self {
         let exited_at = worker_exit.at;
-        let pending_age_secs = now.signed_duration_since(exited_at).num_seconds().max(0);
+        let pending_age_secs = now.duration_since(exited_at).as_secs().max(0);
         let resume_hint = if reason == RESIDENT_IDLE_REASON {
             let q_run = shell_single_quote(run_id);
             format!(
@@ -239,10 +239,10 @@ mod tests {
     use super::*;
 
     fn exit(code: Option<i32>, signal: Option<i32>) -> WorkerExit {
-        exit_at(code, signal, Utc::now())
+        exit_at(code, signal, Timestamp::now())
     }
 
-    fn exit_at(code: Option<i32>, signal: Option<i32>, at: DateTime<Utc>) -> WorkerExit {
+    fn exit_at(code: Option<i32>, signal: Option<i32>, at: Timestamp) -> WorkerExit {
         WorkerExit { code, signal, at }
     }
 
@@ -311,7 +311,7 @@ mod tests {
     /// NOT since the run started), clamped at 0 under clock skew.
     #[test]
     fn pending_age_anchors_on_worker_exit_and_clamps() {
-        let now: DateTime<Utc> = "2026-08-15T12:00:00Z".parse().unwrap();
+        let now: Timestamp = "2026-08-15T12:00:00Z".parse().unwrap();
         // Exited 30 min ago → 1800s, regardless of how long the run had been going.
         let exited = exit_at(Some(0), None, "2026-08-15T11:30:00Z".parse().unwrap());
         let v = AttentionView::build("r", now, &exited, None, None, None);

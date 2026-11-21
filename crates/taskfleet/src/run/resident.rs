@@ -32,8 +32,8 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
 use fs4::{FileExt, TryLockError};
+use jiff::Timestamp;
 use serde::Serialize;
 use taskfleet_core::schema::CreatorSession;
 use taskfleet_core::{
@@ -393,20 +393,20 @@ pub fn round_state(state: Option<&ResidentState>) -> RoundState {
 pub struct RoundView {
     pub round: u32,
     pub attempt: u32,
-    pub reported_at: DateTime<Utc>,
+    pub reported_at: Timestamp,
     pub summary: String,
     /// The parent stopped this round with `run interrupt`.
     pub interrupted: bool,
     pub open: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub closed_at: Option<DateTime<Utc>>,
+    pub closed_at: Option<Timestamp>,
 }
 
 /// The latest landing as surfaced on `run show` / `run list`.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct LandingView {
     pub round: u32,
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     pub source_branch: String,
     pub integrated_oid: String,
 }
@@ -423,12 +423,12 @@ pub struct ResidentView {
     pub idle_expiry_secs: u64,
     /// When idle expiry will act on the open round (worker exited only).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub idle_expires_at: Option<DateTime<Utc>>,
+    pub idle_expires_at: Option<Timestamp>,
     /// Set when idle expiry found unlanded work and preserved it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expiry_attention_at: Option<DateTime<Utc>>,
+    pub expiry_attention_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dormant_since: Option<DateTime<Utc>>,
+    pub dormant_since: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_round: Option<RoundView>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -438,7 +438,7 @@ pub struct ResidentView {
 /// When idle expiry may act: the open round's report time plus the policy,
 /// only once the reporting worker has exited (a running worker is never idle).
 #[must_use]
-pub fn idle_deadline(policy: &ResidentPolicy, node: &Node) -> Option<DateTime<Utc>> {
+pub fn idle_deadline(policy: &ResidentPolicy, node: &Node) -> Option<Timestamp> {
     let state = node.resident.as_deref()?;
     if state.dormant_since.is_some() || node.worker_exit.is_none() {
         return None;
@@ -446,7 +446,8 @@ pub fn idle_deadline(policy: &ResidentPolicy, node: &Node) -> Option<DateTime<Ut
     let open = state.open_round()?;
     let secs = i64::try_from(policy.idle_expiry_secs).unwrap_or(i64::MAX);
     open.reported_at
-        .checked_add_signed(chrono::Duration::seconds(secs))
+        .checked_add(jiff::SignedDuration::from_secs(secs))
+        .ok()
 }
 
 /// Build the resident read view for a run, or `None` for an ordinary run.
@@ -626,7 +627,7 @@ mod tests {
         s.last_round = Some(taskfleet_core::RoundReport {
             round: 1,
             attempt: 0,
-            reported_at: Utc::now(),
+            reported_at: Timestamp::now(),
             event_seq: 9,
             summary: "done".into(),
             interrupted: false,
@@ -634,10 +635,10 @@ mod tests {
             closed_by: None,
         });
         assert_eq!(round_state(Some(&s)), RoundState::Waiting);
-        s.dormant_since = Some(Utc::now());
+        s.dormant_since = Some(Timestamp::now());
         assert_eq!(round_state(Some(&s)), RoundState::Dormant);
         s.dormant_since = None;
-        s.last_round.as_mut().unwrap().closed_at = Some(Utc::now());
+        s.last_round.as_mut().unwrap().closed_at = Some(Timestamp::now());
         assert_eq!(round_state(Some(&s)), RoundState::Working);
     }
 }

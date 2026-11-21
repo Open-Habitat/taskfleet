@@ -3,7 +3,7 @@
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -98,7 +98,7 @@ pub fn recover_last_seq(events_path: &Path) -> Result<u64> {
 #[allow(dead_code)] // fields exist to force serde validation, not to be read
 struct SeqLine {
     seq: u64,
-    ts: chrono::DateTime<chrono::Utc>,
+    ts: jiff::Timestamp,
     kind: String,
     run_id: crate::schema::RunId,
     #[serde(default)]
@@ -240,7 +240,7 @@ fn write_event_line(
     data: Value,
 ) -> Result<()> {
     let ev = Event {
-        ts: Utc::now(),
+        ts: Timestamp::now(),
         seq,
         kind: kind.to_string(),
         run_id: paths.run_id.clone(),
@@ -446,7 +446,7 @@ fn append_and_apply_reporting(
     let last = recover_last_seq(&events_path)?;
     let seq = last + 1;
     let ev = Event {
-        ts: Utc::now(),
+        ts: Timestamp::now(),
         seq,
         kind: kind.to_string(),
         run_id: paths.run_id.clone(),
@@ -2206,7 +2206,7 @@ mod tests {
 
         fn ev(paths: &RunPaths, kind: &str, node_id: Option<&str>, data: Value) -> Event {
             Event {
-                ts: Utc::now(),
+                ts: Timestamp::now(),
                 seq: 999,
                 kind: kind.to_string(),
                 run_id: paths.run_id.clone(),

@@ -664,9 +664,9 @@ fn backdate_manifest_updated_at(home: &TempDir, run_id: &str, minutes_ago: i64) 
     let path = home.path().join("runs").join(run_id).join("manifest.json");
     let mut m: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("read manifest")).expect("parse");
-    let old = chrono::Utc::now() - chrono::Duration::minutes(minutes_ago);
-    // Match the manifest's RFC3339 serialization (`chrono` `DateTime<Utc>`).
-    m["updated_at"] = json!(old.to_rfc3339_opts(chrono::SecondsFormat::Micros, true));
+    let old = jiff::Timestamp::now() - jiff::SignedDuration::from_mins(minutes_ago);
+    // Match the manifest's RFC3339 serialization (`jiff::Timestamp`).
+    m["updated_at"] = json!(format!("{old:.6}"));
     std::fs::write(&path, serde_json::to_vec(&m).expect("serialize")).expect("write manifest");
 }
 

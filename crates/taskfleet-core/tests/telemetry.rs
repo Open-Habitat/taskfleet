@@ -1,6 +1,6 @@
 use std::fs;
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::{json, Value};
 use taskfleet_core::{
     parse_telemetry_update, read_node, read_telemetry_with_clock, update_telemetry_with_clock,
@@ -13,18 +13,15 @@ const RUN: &str = "01jxsnap000000000000000000";
 const NODE: &str = "n-0001";
 
 #[derive(Clone, Copy)]
-struct FixedClock(DateTime<Utc>);
+struct FixedClock(Timestamp);
 impl TelemetryClock for FixedClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         self.0
     }
 }
 
-fn time(seconds: i64) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-08-24T12:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
-        + Duration::seconds(seconds)
+fn time(seconds: i64) -> Timestamp {
+    "2026-08-24T12:00:00Z".parse::<Timestamp>().unwrap() + SignedDuration::from_secs(seconds)
 }
 
 fn node_value(status: &str, attempt: u32) -> Value {
@@ -541,7 +538,7 @@ fn clock_overflow_rejects_without_replacing_prior_sample() {
         update_telemetry_with_clock(
             &paths,
             &update(0, TelemetryState::Settled),
-            &FixedClock(DateTime::<Utc>::MAX_UTC)
+            &FixedClock(Timestamp::MAX)
         ),
         Err(TelemetryError::ClockOverflow)
     ));

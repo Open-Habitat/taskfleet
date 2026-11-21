@@ -343,7 +343,7 @@ fn write_session_header(
         "type": "session",
         "version": 3,
         "id": session_id,
-        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "timestamp": jiff::Timestamp::now().to_string(),
         "cwd": cwd,
     });
     let mut options = std::fs::OpenOptions::new();

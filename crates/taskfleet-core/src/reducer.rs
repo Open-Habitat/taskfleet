@@ -47,7 +47,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::Value;
 
 use crate::error::{Error, Result};
@@ -202,18 +202,20 @@ fn optional_ts(
     field: &str,
     events_path: &Path,
     ev: &Event,
-) -> Result<Option<DateTime<Utc>>> {
+) -> Result<Option<Timestamp>> {
     match d.get(field) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(s)) => DateTime::parse_from_rfc3339(s)
-            .map(|dt| Some(dt.with_timezone(&Utc)))
-            .map_err(|_| Error::CorruptEventLog {
-                path: events_path.to_path_buf(),
-                reason: format!(
-                    "event seq={} kind={} `{field}` not RFC3339",
-                    ev.seq, ev.kind
-                ),
-            }),
+        Some(Value::String(s)) => {
+            s.parse::<Timestamp>()
+                .map(Some)
+                .map_err(|_| Error::CorruptEventLog {
+                    path: events_path.to_path_buf(),
+                    reason: format!(
+                        "event seq={} kind={} `{field}` not RFC3339",
+                        ev.seq, ev.kind
+                    ),
+                })
+        }
         Some(_) => Err(Error::CorruptEventLog {
             path: events_path.to_path_buf(),
             reason: format!(
@@ -2371,12 +2373,12 @@ fn reduce_node_resident_attention(paths: &RunPaths, ev: &Event) -> Result<Vec<Pr
 mod tests {
     use super::*;
     use crate::schema::Event;
-    use chrono::Utc;
+    use jiff::Timestamp;
     use tempfile::TempDir;
 
     fn event(run_id: &str) -> Event {
         Event {
-            ts: Utc::now(),
+            ts: Timestamp::now(),
             seq: 1,
             kind: "run.status".into(),
             run_id: RunId::parse_str(run_id).unwrap(),
@@ -2879,7 +2881,7 @@ mod tests {
         let run_id = "01jxwd0000000000000000000w";
         let paths = seed_run_with_node(&tmp, run_id);
         let nid = Some(NodeId::parse_str("n-0001").unwrap());
-        let opened_at: chrono::DateTime<Utc> = "2026-08-16T12:00:00Z".parse().unwrap();
+        let opened_at: jiff::Timestamp = "2026-08-16T12:00:00Z".parse().unwrap();
         let mut open = event(run_id);
         open.seq = 3;
         open.ts = opened_at;
@@ -2898,7 +2900,7 @@ mod tests {
         // A duplicate/restarted supervisor observation cannot restart the clock.
         let mut duplicate = open.clone();
         duplicate.seq = 4;
-        duplicate.ts = opened_at + chrono::Duration::hours(1);
+        duplicate.ts = opened_at + jiff::SignedDuration::from_hours(1);
         apply_event(&paths, &duplicate).unwrap();
         let still_first = read_n0001(&paths).awaiting_input.unwrap();
         assert_eq!(still_first.opened_at, opened_at);
@@ -3513,7 +3515,7 @@ mod tests {
         let mut at = |kind: &str, node_id, data| {
             next_seq += 1;
             Event {
-                ts: Utc::now(),
+                ts: Timestamp::now(),
                 seq: next_seq,
                 kind: kind.into(),
                 run_id: rid.clone(),
@@ -3749,7 +3751,7 @@ mod tests {
         later.seq = 4;
         later.kind = "node.death_observed".into();
         later.node_id = Some(nid.clone());
-        later.ts = ev.ts + chrono::Duration::seconds(30);
+        later.ts = ev.ts + jiff::SignedDuration::from_secs(30);
         later.data = serde_json::json!({});
         apply_event(&paths, &later).expect("re-observation applies as no-op");
         assert_eq!(

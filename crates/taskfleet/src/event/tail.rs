@@ -334,7 +334,7 @@ fn text_summary(ev: &Event) -> String {
     format!(
         "[{seq}] {ts} {kind}{node}{detail}",
         seq = ev.seq,
-        ts = ev.ts.to_rfc3339(),
+        ts = ev.ts,
         kind = ev.kind,
     )
 }

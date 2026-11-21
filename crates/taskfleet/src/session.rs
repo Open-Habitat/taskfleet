@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use clap::{Args, Subcommand};
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::json;
 use taskfleet_core::{
@@ -92,7 +92,7 @@ fn maintain(args: MaintainArgs, spec: &OutputSpec, warnings: &[String]) -> Resul
     };
     let mut candidates = scan_candidates(&root, deadline, &mut payload)?;
     mark_count_expiry(&mut candidates);
-    let now = Utc::now();
+    let now = Timestamp::now();
     for candidate in candidates {
         if Instant::now() >= deadline {
             payload.timed_out = true;
@@ -933,9 +933,11 @@ pub(crate) fn close_persistent_non_pi(paths: &RunPaths, node: &Node, tmux: &str)
     close_original_workmux_window(paths, node, tmux);
 }
 
-fn expiry_at(retained_at: chrono::DateTime<Utc>, ttl_secs: u64) -> Option<chrono::DateTime<Utc>> {
+fn expiry_at(retained_at: jiff::Timestamp, ttl_secs: u64) -> Option<jiff::Timestamp> {
     let seconds = i64::try_from(ttl_secs).ok()?;
-    retained_at.checked_add_signed(chrono::Duration::seconds(seconds))
+    retained_at
+        .checked_add(jiff::SignedDuration::from_secs(seconds))
+        .ok()
 }
 
 fn dispose_original_pane(
@@ -1177,7 +1179,7 @@ fn wait_owned_display(
     tmux: &str,
     identity: &taskfleet_core::TmuxIdentity,
     marker: &str,
-    retained_at: chrono::DateTime<Utc>,
+    retained_at: jiff::Timestamp,
 ) -> Option<RetainedDisplay> {
     let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline {
@@ -1193,7 +1195,7 @@ fn find_owned_display(
     tmux: &str,
     identity: &taskfleet_core::TmuxIdentity,
     marker: &str,
-    retained_at: chrono::DateTime<Utc>,
+    retained_at: jiff::Timestamp,
 ) -> Option<RetainedDisplay> {
     let socket = identity.socket.as_deref()?;
     let server_pid = identity.server_pid?;
@@ -1629,8 +1631,8 @@ mod tests {
             server_pid_start_secs: crate::supervise::watchdog::pid_start_time(server).unwrap(),
             server_marker: String::new(),
             ownership_marker: marker,
-            retained_at: Utc::now() - chrono::Duration::hours(2),
-            expires_at: Utc::now() - chrono::Duration::hours(1),
+            retained_at: Timestamp::now() - jiff::SignedDuration::from_hours(2),
+            expires_at: Timestamp::now() - jiff::SignedDuration::from_hours(1),
             expired_at: None,
         };
         append_and_apply_event(
@@ -2157,7 +2159,7 @@ mod tests {
     #[test]
     fn count_bound_marks_oldest_and_keeps_equal_time_order_deterministic() {
         let temp = tempfile::tempdir().unwrap();
-        let retained_at = Utc::now();
+        let retained_at = Timestamp::now();
         let mut candidates = (0..3)
             .map(|index| {
                 let run_id =
@@ -2178,7 +2180,7 @@ mod tests {
                         server_marker: "owner".into(),
                         ownership_marker: format!("owned-{index}"),
                         retained_at,
-                        expires_at: retained_at + chrono::Duration::hours(1),
+                        expires_at: retained_at + jiff::SignedDuration::from_hours(1),
                         expired_at: None,
                     },
                     max: 2,
@@ -2217,8 +2219,8 @@ mod tests {
             server_pid_start_secs: 1,
             server_marker: String::new(),
             ownership_marker: "owned".into(),
-            retained_at: Utc::now(),
-            expires_at: Utc::now(),
+            retained_at: Timestamp::now(),
+            expires_at: Timestamp::now(),
             expired_at: None,
         };
         assert!(matches!(

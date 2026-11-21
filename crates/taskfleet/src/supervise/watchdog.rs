@@ -141,7 +141,7 @@ impl RecordedStart {
     pub fn of_agent(node: &taskfleet_core::Node) -> Self {
         Self::new(
             node.agent_pid_start_time
-                .map(|t| u64::try_from(t.timestamp()).unwrap_or(0)),
+                .map(|t| u64::try_from(t.as_second()).unwrap_or(0)),
             node.agent_pid_start_identity.as_deref(),
         )
     }

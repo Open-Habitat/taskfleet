@@ -165,7 +165,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         // mid-run with ≥1 node, idle past the grace (issue `run-wait-still`).
         // (The 0.2 cut removed the orchestrate-driver "never driven" stall shape
         // along with the `orchestrate` kind.)
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let stall = crate::run::stalled::stall_kind(
             manifest.status,
             // Indeterminate (`Unreadable`/`Unknown`) supervisor states must not
@@ -183,11 +183,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         // Clamp to 0: clock skew or a future timestamp must never print a
         // negative "idle -3 min" in the human hint.
         let stalled_idle_min = if stall.is_some() {
-            Some(
-                now.signed_duration_since(manifest.updated_at)
-                    .num_minutes()
-                    .max(0),
-            )
+            Some(now.duration_since(manifest.updated_at).as_mins().max(0))
         } else {
             None
         };

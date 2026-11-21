@@ -61,12 +61,12 @@ const STILLBORN_LIST_GRACE_SECS: i64 = 900;
 const STILLBORN_LIST_GRACE_ENV: &str = "TASKFLEET_STILLBORN_LIST_GRACE_SECS";
 
 /// The effective stillborn grace, honoring [`STILLBORN_LIST_GRACE_ENV`].
-fn stillborn_list_grace() -> chrono::Duration {
+fn stillborn_list_grace() -> jiff::SignedDuration {
     let secs = std::env::var(STILLBORN_LIST_GRACE_ENV)
         .ok()
         .and_then(|v| v.trim().parse::<i64>().ok())
         .unwrap_or(STILLBORN_LIST_GRACE_SECS);
-    chrono::Duration::seconds(secs)
+    jiff::SignedDuration::from_secs(secs)
 }
 
 pub fn run(args: Args<'_>) -> Result<(), CliError> {
@@ -109,7 +109,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
     // One stall deadline per invocation — every run in this listing is judged
     // against the same instant, so two runs with identical `updated_at` can't
     // disagree on `stalled` due to per-run clock sampling.
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     // Minimum age a run must reach before `run list` flags it `stillborn`.
     let stillborn_grace = stillborn_list_grace();
 
@@ -198,7 +198,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 m.node_count,
                 m.created_at,
                 m.updated_at,
-            ) && now.signed_duration_since(m.created_at) > stillborn_grace;
+            ) && now.duration_since(m.created_at) > stillborn_grace;
             // Attention-required (design.md §2.5 / A5): read the reporting node in
             // the SAME shared-lock snapshot as the manifest so the worker-exit fact
             // and `status` cannot straddle a reducer write. Gated on a SINGLE-worker

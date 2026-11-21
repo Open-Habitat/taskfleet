@@ -516,7 +516,7 @@ fn positively_live_worker_overrides_stale_told_exit_before_authorization() {
     let f = Fixture::failed();
     let pid = std::process::id();
     let system = System::new_all();
-    let start = chrono::DateTime::from_timestamp(
+    let start = jiff::Timestamp::new(
         system.process(Pid::from_u32(pid)).unwrap().start_time() as i64,
         0,
     )
@@ -525,7 +525,7 @@ fn positively_live_worker_overrides_stale_told_exit_before_authorization() {
     let mut node: Value = serde_json::from_slice(&std::fs::read(&node_path).unwrap()).unwrap();
     node["agent_pid"] = json!(pid);
     node["agent_pid_start_time"] = json!(start);
-    node["worker_exit"] = json!({"code":0,"signal":null,"at":chrono::Utc::now()});
+    node["worker_exit"] = json!({"code":0,"signal":null,"at":jiff::Timestamp::now()});
     std::fs::write(node_path, serde_json::to_vec_pretty(&node).unwrap()).unwrap();
 
     let out = command(

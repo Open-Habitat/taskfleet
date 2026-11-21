@@ -1,6 +1,6 @@
 //! On-disk state schema types per `design.md` §1.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -671,9 +671,9 @@ pub struct Manifest {
     /// Current aggregate run status.
     pub status: Status,
     /// When the run was created.
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// When the manifest was last modified.
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     /// Source repository the run operates on, if any.
     pub source_repo: Option<String>,
     /// Branch the run was started from, if any.
@@ -793,7 +793,7 @@ pub struct RoundReport {
     /// Worker attempt that reported it.
     pub attempt: u32,
     /// Envelope timestamp of the report (the idle-expiry anchor).
-    pub reported_at: DateTime<Utc>,
+    pub reported_at: Timestamp,
     /// Event sequence of the report.
     pub event_seq: u64,
     /// Worker-written summary of the round (bounded). For an interrupted round
@@ -806,7 +806,7 @@ pub struct RoundReport {
     pub interrupted: bool,
     /// Set when the next message resumed the worker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub closed_at: Option<DateTime<Utc>>,
+    pub closed_at: Option<Timestamp>,
     /// Message id that closed the round.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_by: Option<String>,
@@ -816,7 +816,7 @@ pub struct RoundReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoundLanding {
     /// When the landing was recorded.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
     /// Source branch that was fast-forwarded.
     pub source_branch: String,
     /// The integrated tip now at the source branch.
@@ -839,10 +839,10 @@ pub struct ResidentState {
     pub last_landing: Option<RoundLanding>,
     /// Set when idle expiry removed the worktree of a wholly landed round.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dormant_since: Option<DateTime<Utc>>,
+    pub dormant_since: Option<Timestamp>,
     /// Set when idle expiry found unlanded work and raised attention.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expiry_attention_at: Option<DateTime<Utc>>,
+    pub expiry_attention_at: Option<Timestamp>,
 }
 
 impl ResidentState {
@@ -1008,13 +1008,13 @@ pub struct RetainedDisplay {
     /// Exact Taskfleet ownership marker stored as a tmux window option.
     pub ownership_marker: String,
     /// Time the terminal display became durable.
-    pub retained_at: DateTime<Utc>,
+    pub retained_at: Timestamp,
     /// Policy-derived expiry time.
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Timestamp,
     /// Set after maintenance removed the exact owned display. Durable archives
     /// and run events are intentionally untouched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expired_at: Option<DateTime<Utc>>,
+    pub expired_at: Option<Timestamp>,
 }
 
 /// Immutable caller-owned native Pi session identity. This is an association,
@@ -1189,7 +1189,7 @@ pub struct Node {
     pub agent_pid: Option<i32>,
     /// Start time of the agent process (wall-clock seconds). Detects PID reuse
     /// only for a node recorded without `agent_pid_start_identity`.
-    pub agent_pid_start_time: Option<DateTime<Utc>>,
+    pub agent_pid_start_time: Option<Timestamp>,
     /// Kernel start identity of the agent process (`linux:<starttime ticks>`
     /// or `macos:<sec>:<usec>`), compared exactly to detect PID reuse. Unlike
     /// the seconds value it does not move when the wall clock is stepped.
@@ -1201,9 +1201,9 @@ pub struct Node {
     #[serde(default)]
     pub children: Vec<ChildRef>,
     /// When the node started executing, if it has.
-    pub started_at: Option<DateTime<Utc>>,
+    pub started_at: Option<Timestamp>,
     /// When the node file was last modified.
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Timestamp,
     /// The `node.report` payload that drove this node to its terminal status.
     /// Set only by the report that actually transitions the node (Done /
     /// Failed / Cancelled). Once the node is terminal it is frozen: a late
@@ -1284,7 +1284,7 @@ pub struct Node {
     /// (the shim records `worker.exited` and the backstop never engages).
     /// `#[serde(default)]` keeps a node written before this field existed readable.
     #[serde(default)]
-    pub first_death_at: Option<DateTime<Utc>>,
+    pub first_death_at: Option<Timestamp>,
     /// An open, agent-authored request for a human decision. The worker records
     /// this through `node.awaiting_input` instead of blocking on interactive
     /// stdin. It remains non-terminal and is cleared by `node.input_resolved`, a
@@ -1312,7 +1312,7 @@ pub struct Node {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AwaitingInput {
     /// Timestamp of the first open signal in the current unresolved generation.
-    pub opened_at: DateTime<Utc>,
+    pub opened_at: Timestamp,
     /// Event sequence that opened this generation, used to deduplicate its
     /// delayed parent notification independently from later generations.
     pub event_seq: u64,
@@ -1391,7 +1391,7 @@ pub struct MergeTxn {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub landing: bool,
     /// When the transaction was recorded.
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
 }
 
 /// Immutable provenance for a caller-owned merge. Checked against the intent
@@ -1425,7 +1425,7 @@ pub struct WorkerExit {
     #[serde(default)]
     pub signal: Option<i32>,
     /// When the shim observed the worker's exit.
-    pub at: DateTime<Utc>,
+    pub at: Timestamp,
 }
 
 impl WorkerExit {
@@ -1535,7 +1535,7 @@ impl TmuxIdentity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     /// Wall-clock timestamp the event was appended.
-    pub ts: DateTime<Utc>,
+    pub ts: Timestamp,
     /// Monotonic per-run sequence number (recovered on append).
     pub seq: u64,
     /// Event kind discriminator (e.g. `node.created`, `discussion.opened`).

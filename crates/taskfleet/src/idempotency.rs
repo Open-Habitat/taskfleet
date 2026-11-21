@@ -32,8 +32,8 @@ use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use fs4::{FileExt, TryLockError};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
@@ -88,7 +88,7 @@ fn lock_path_in(root: &Path, repo: Option<&str>, branch: Option<&str>, key: &str
 pub struct CreatorLease {
     pub pid: u32,
     pub pid_start_secs: Option<u64>,
-    pub started_at: DateTime<Utc>,
+    pub started_at: Timestamp,
     /// Absolute path of the inherited materializer flock. New creators hold
     /// this lock in both the CLI and native materializer process tree until publication.
     #[serde(default)]
@@ -626,7 +626,7 @@ mod tests {
             CreatorLease {
                 pid,
                 pid_start_secs: Some(u64::from(pid)),
-                started_at: Utc::now(),
+                started_at: Timestamp::now(),
                 materializer_lease_path: None,
             },
         )

@@ -807,7 +807,7 @@ fn run_show_and_list_surface_only_observational_telemetry() {
 
 #[test]
 fn run_views_distinguish_freshness_corruption_and_old_attempts() {
-    use chrono::{Duration, SecondsFormat, Utc};
+    use jiff::{SignedDuration, Timestamp};
 
     let home = TempDir::new().unwrap();
     let run_id = create_run(&home);
@@ -839,19 +839,19 @@ fn run_views_distinguish_freshness_corruption_and_old_attempts() {
     };
     assert_eq!(sample_status(), "current");
 
-    let now = Utc::now();
-    let stamp = |time: chrono::DateTime<Utc>| time.to_rfc3339_opts(SecondsFormat::Millis, true);
+    let now = Timestamp::now();
+    let stamp = |time: jiff::Timestamp| format!("{time:.3}");
     let mut stale = valid.clone();
-    stale["state_since"] = json!(stamp(now - Duration::seconds(120)));
-    stale["received_at"] = json!(stamp(now - Duration::seconds(100)));
-    stale["expires_at"] = json!(stamp(now - Duration::seconds(10)));
+    stale["state_since"] = json!(stamp(now - SignedDuration::from_secs(120)));
+    stale["received_at"] = json!(stamp(now - SignedDuration::from_secs(100)));
+    stale["expires_at"] = json!(stamp(now - SignedDuration::from_secs(10)));
     std::fs::write(&sample_path, serde_json::to_vec(&stale).unwrap()).unwrap();
     assert_eq!(sample_status(), "stale");
 
     let mut future = valid.clone();
-    future["state_since"] = json!(stamp(now + Duration::seconds(10)));
-    future["received_at"] = json!(stamp(now + Duration::seconds(10)));
-    future["expires_at"] = json!(stamp(now + Duration::seconds(100)));
+    future["state_since"] = json!(stamp(now + SignedDuration::from_secs(10)));
+    future["received_at"] = json!(stamp(now + SignedDuration::from_secs(10)));
+    future["expires_at"] = json!(stamp(now + SignedDuration::from_secs(100)));
     std::fs::write(&sample_path, serde_json::to_vec(&future).unwrap()).unwrap();
     assert_eq!(sample_status(), "clock_unreliable");
 

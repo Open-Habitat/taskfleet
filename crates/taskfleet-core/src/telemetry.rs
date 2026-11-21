@@ -8,7 +8,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::atomic::write_atomic;
@@ -30,7 +30,7 @@ pub const TELEMETRY_FRESHNESS_SECS: i64 = 90;
 /// Injectable source of wall-clock time used by telemetry updates and reads.
 pub trait TelemetryClock {
     /// Return the current server time.
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> Timestamp;
 }
 
 /// Production telemetry clock.
@@ -38,8 +38,8 @@ pub trait TelemetryClock {
 pub struct SystemTelemetryClock;
 
 impl TelemetryClock for SystemTelemetryClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -93,9 +93,9 @@ pub struct TelemetryAccepted {
     /// Current attempt accepted.
     pub attempt: u32,
     /// Server receive timestamp.
-    pub received_at: DateTime<Utc>,
+    pub received_at: Timestamp,
     /// Server-computed freshness boundary.
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Timestamp,
 }
 
 /// Validation or state error from a telemetry update.
@@ -240,9 +240,9 @@ struct StoredTelemetrySample {
     active_tool_count: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tool_name: Option<String>,
-    state_since: DateTime<Utc>,
-    received_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
+    state_since: Timestamp,
+    received_at: Timestamp,
+    expires_at: Timestamp,
 }
 
 /// Parse a strict JSON request, rejecting unknown fields and every representation
@@ -315,7 +315,8 @@ pub fn update_telemetry_with_clock(
 
     let received_at = clock.now();
     let expires_at = received_at
-        .checked_add_signed(Duration::seconds(TELEMETRY_FRESHNESS_SECS))
+        .checked_add(SignedDuration::from_secs(TELEMETRY_FRESHNESS_SECS))
+        .ok()
         .ok_or(TelemetryError::ClockOverflow)?;
     let path = checked_telemetry_file(paths, &update.node_id)?;
     let prior = match read_stored(&path)? {
@@ -418,7 +419,7 @@ pub fn read_all_telemetry_with_clock(
 fn read_telemetry_locked(
     paths: &RunPaths,
     node_id: &NodeId,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<TelemetryView, Error> {
     let node = read_node(paths, node_id)?;
     let path = checked_telemetry_file(paths, node_id)?;
@@ -444,8 +445,9 @@ fn read_telemetry_locked(
     Ok(TelemetryView {
         sample: status,
         state: Some(sample.state),
-        age_ms: (!clock_bad).then(|| (now - sample.received_at).num_milliseconds()),
-        state_elapsed_ms: (!clock_bad).then(|| (now - sample.state_since).num_milliseconds()),
+        age_ms: (!clock_bad).then(|| now.duration_since(sample.received_at).as_millis() as i64),
+        state_elapsed_ms: (!clock_bad)
+            .then(|| now.duration_since(sample.state_since).as_millis() as i64),
         attempt: Some(sample.attempt),
         active_tool_count: sample.active_tool_count,
         tool_name: sample.tool_name,
@@ -524,8 +526,8 @@ fn valid_stored_shape(sample: &StoredTelemetrySample, paths: &RunPaths, node_id:
         && sample.node_id == *node_id
         && sample
             .received_at
-            .checked_add_signed(Duration::seconds(TELEMETRY_FRESHNESS_SECS))
-            .is_some_and(|expected| sample.expires_at == expected)
+            .checked_add(SignedDuration::from_secs(TELEMETRY_FRESHNESS_SECS))
+            .is_ok_and(|expected| sample.expires_at == expected)
         && validate_metadata(
             sample.state,
             sample.active_tool_count,

@@ -1989,7 +1989,7 @@ fn backdate_manifest_updated_at(home: &TempDir, run_id: &str, minutes_ago: i64) 
     let path = home.path().join("runs").join(run_id).join("manifest.json");
     let mut m: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("read manifest")).expect("parse");
-    let ts = (chrono::Utc::now() - chrono::Duration::minutes(minutes_ago)).to_rfc3339();
+    let ts = (jiff::Timestamp::now() - jiff::SignedDuration::from_mins(minutes_ago)).to_string();
     m.as_object_mut()
         .unwrap()
         .insert("updated_at".into(), Value::String(ts));

@@ -11,7 +11,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Timestamps are handled with `jiff` instead of the now-unmaintained `chrono` (RUSTSEC-2026-0543), and human durations (`run wait --timeout`, `--poll-interval`, `--check-in`, `tmux.completed_window_ttl`) are parsed by a small local parser instead of the unmaintained `humantime` (RUSTSEC-2026-0542), accepting the same units including days and weeks (`cargo-deny-advisories-2026-11`). Stored and JSON timestamps stay RFC 3339 UTC and existing run state reads unchanged; fractional seconds are now printed with the fewest digits needed, and text-mode output and `event tail` print the RFC 3339 `…Z` form instead of `YYYY-MM-DD HH:MM:SS UTC` / `+00:00`. `taskfleet-core`'s public timestamp fields are now `jiff::Timestamp`.
+
+- Replace unmaintained `chrono` and `humantime` dependencies (`cargo-deny-advisories-2026-11`).
+
 ### Fixed
+
+- Bump `rustix` to 1.1.6 for the unsound xattr buffer advisory RUSTSEC-2026-0486 (`cargo-deny-advisories-2026-11`).
 <!-- oss-changelog:unreleased-end -->
 
 ## [0.20.0] - 2026-11-08

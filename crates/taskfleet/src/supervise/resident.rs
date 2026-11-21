@@ -18,7 +18,7 @@
 //! The deadline is a timer on the told round report, not an activity clock:
 //! nothing here looks at panes, output, or CPU.
 
-use chrono::Utc;
+use jiff::Timestamp;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -73,7 +73,7 @@ pub(crate) fn tick(paths: &RunPaths, run_id: &str, round_notified: &mut Option<u
     let Some(deadline) = crate::run::resident::idle_deadline(policy, &node) else {
         return;
     };
-    if Utc::now() < deadline {
+    if Timestamp::now() < deadline {
         return;
     }
     let Ok(Some(_lock)) = crate::run::resident::ResidentLock::try_acquire(paths) else {
@@ -92,7 +92,8 @@ pub(crate) fn tick(paths: &RunPaths, run_id: &str, round_notified: &mut Option<u
                 && s.open_round()
                     .is_some_and(|r| r.event_seq == open.event_seq)
         })
-        && crate::run::resident::idle_deadline(policy, &node).is_some_and(|d| Utc::now() >= d);
+        && crate::run::resident::idle_deadline(policy, &node)
+            .is_some_and(|d| Timestamp::now() >= d);
     if !still_due {
         return;
     }
