@@ -48,7 +48,7 @@ use crate::output::{self, OutputFormat, OutputSpec};
 use crate::run::{from_core, parse_node_id, run_paths_from_cli_arg};
 
 /// Longest single `--wait`.
-const MAX_WAIT: Duration = Duration::from_secs(24 * 3600);
+const MAX_WAIT: Duration = Duration::from_hours(24);
 const POLL_START: Duration = Duration::from_millis(100);
 const POLL_CAP: Duration = Duration::from_secs(1);
 
@@ -277,13 +277,12 @@ fn ask_or_attach(
                 .data
                 .get(k)
                 .and_then(Value::as_array)
-                .map(|a| {
+                .map_or_default(|a| {
                     a.iter()
                         .filter_map(Value::as_str)
                         .map(str::to_string)
                         .collect()
                 })
-                .unwrap_or_default()
         };
         return Ok(Start::Asked(Asked {
             ask_id: prior.seq,
@@ -518,7 +517,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 }
                 let until_deadline = (at - Utc::now()).to_std().unwrap_or_default();
                 let nap = backoff
-                    .min(args.wait - elapsed)
+                    .min(args.wait.saturating_sub(elapsed))
                     .min(until_deadline)
                     .max(Duration::from_millis(10));
                 std::thread::sleep(nap);

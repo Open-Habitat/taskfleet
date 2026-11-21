@@ -285,8 +285,7 @@ pub fn run(show_secrets: bool, spec: &OutputSpec, warnings: &[String]) -> Result
                     let origin = layer
                         .origin_key
                         .as_deref()
-                        .map(|origin| format!(" {origin}"))
-                        .unwrap_or_default();
+                        .map_or_default(|origin| format!(" {origin}"));
                     let validity = if layer.valid { "valid" } else { "INVALID" };
                     println!(
                         "  {marker} {:<7} {:<10} ({validity}){}",

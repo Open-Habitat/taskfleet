@@ -244,8 +244,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             let resident = crate::run::resident::view(&m, default_node.as_ref());
             let ask_views = default_node
                 .as_ref()
-                .map(|n| crate::run::ask::views(m.run_id.as_str(), n, now))
-                .unwrap_or_default();
+                .map_or_default(|n| crate::run::ask::views(m.run_id.as_str(), n, now));
             let worktree_path = default_node.as_ref().and_then(|n| n.worktree_path.clone());
             Ok(Some((
                 m,
@@ -461,7 +460,11 @@ fn emit(runs: Vec<RunSummary>, spec: &OutputSpec, warnings: &[String]) -> Result
                     format!("{} (stillborn)", r.status)
                 } else if r.stalled {
                     format!("{} (stalled)", r.status)
-                } else if r.open_ask.as_ref().is_some_and(|a| a.settles_wait()) {
+                } else if r
+                    .open_ask
+                    .as_ref()
+                    .is_some_and(super::ask::OpenAskView::settles_wait)
+                {
                     format!("{} (asked)", r.status)
                 } else if r.awaiting_input {
                     format!("{} (awaiting-input)", r.status)

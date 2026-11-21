@@ -1066,8 +1066,7 @@ pub fn quarantine_corrupt_lines_unlocked(
 fn backup_path_for(events_path: &Path, ts: &str) -> PathBuf {
     let mut name = events_path
         .file_name()
-        .map(std::ffi::OsStr::to_os_string)
-        .unwrap_or_default();
+        .map_or_default(std::ffi::OsStr::to_os_string);
     name.push(format!(".corrupt-{ts}.bak"));
     events_path.with_file_name(name)
 }

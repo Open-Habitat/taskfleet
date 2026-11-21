@@ -320,11 +320,7 @@ fn emit_event(writer: &mut dyn Write, format: FormatArg, ev: &Event) -> Result<(
 }
 
 fn text_summary(ev: &Event) -> String {
-    let node = ev
-        .node_id
-        .as_ref()
-        .map(|n| format!(" node={n}"))
-        .unwrap_or_default();
+    let node = ev.node_id.as_ref().map_or_default(|n| format!(" node={n}"));
     let detail = text_data_detail(&ev.data);
     let detail = if detail.is_empty() {
         String::new()

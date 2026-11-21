@@ -1927,9 +1927,7 @@ fn prune_managed_claude_dir(dir: &Path) -> std::io::Result<bool> {
 /// user's permissions).
 fn write_marker(path: &Path, skill_name: &str, companions: &[String]) -> Result<(), CliError> {
     clear_marker_symlink(path)?;
-    let skill_hash = lookup(skill_name)
-        .map(|skill| sha256_hex(skill.body.as_bytes()))
-        .unwrap_or_default();
+    let skill_hash = lookup(skill_name).map_or_default(|skill| sha256_hex(skill.body.as_bytes()));
     let mut body = format!(
         "managed-by: taskfleet\ncli_version: {CLI_VERSION}\nskill_name: {skill_name}\nsha256: {skill_hash}\n"
     );

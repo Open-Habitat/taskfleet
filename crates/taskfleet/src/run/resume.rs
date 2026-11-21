@@ -181,8 +181,7 @@ fn rebase_onto_source(
 
 fn conflicted_files(worktree: &Path) -> Vec<String> {
     resident::git(worktree, &["diff", "--name-only", "--diff-filter=U"])
-        .map(|out| out.lines().map(str::to_string).take(50).collect())
-        .unwrap_or_default()
+        .map_or_default(|out| out.lines().map(str::to_string).take(50).collect())
 }
 
 fn message_input(run_id: &str, round: u32, rebase: &str, interrupted: bool, text: &str) -> String {

@@ -866,10 +866,9 @@ fn read_outcome(
         let resident = manifest
             .as_ref()
             .and_then(|m| crate::run::resident::view(m, node.as_ref()));
-        let ask_views = node
-            .as_ref()
-            .map(|n| crate::run::ask::views(paths.run_id.as_str(), n, chrono::Utc::now()))
-            .unwrap_or_default();
+        let ask_views = node.as_ref().map_or_default(|n| {
+            crate::run::ask::views(paths.run_id.as_str(), n, chrono::Utc::now())
+        });
         Ok(GitInputs {
             resident,
             ask_views,

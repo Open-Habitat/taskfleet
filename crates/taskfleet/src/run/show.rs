@@ -221,8 +221,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
             .map(|open| crate::run::awaiting_input::AwaitingInputView::build(open, now));
         let ask_views = node
             .as_ref()
-            .map(|n| crate::run::ask::views(manifest.run_id.as_str(), n, now))
-            .unwrap_or_default();
+            .map_or_default(|n| crate::run::ask::views(manifest.run_id.as_str(), n, now));
         let landing = LandingFields {
             source_repo: manifest.source_repo.clone(),
             source_branch: manifest.source_branch.clone(),

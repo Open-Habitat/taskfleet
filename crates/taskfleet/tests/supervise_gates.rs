@@ -1878,13 +1878,11 @@ fn self_terminate_when_whole_run_dir_removed() {
     assert!(
         !rdir.exists(),
         "supervisor must not resurrect the deleted run dir: {}",
-        std::fs::read_dir(&rdir)
-            .map(|d| d
-                .flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join(", "))
-            .unwrap_or_default()
+        std::fs::read_dir(&rdir).map_or_default(|d| d
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(", "))
     );
 }
 
