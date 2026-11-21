@@ -165,24 +165,44 @@ fn worker_asks_parent_waits_answers_and_worker_continues() {
         bin(home.path()).args(["--output", "json", "run", "wait", &id, "--timeout", "20s"]),
         0,
     );
-    assert!(start.elapsed() < Duration::from_secs(10), "no grace for a question");
+    assert!(
+        start.elapsed() < Duration::from_secs(10),
+        "no grace for a question"
+    );
     let run = &waited["data"]["runs"][0];
     assert_eq!(run["asked"], true);
     assert_eq!(run["open_ask"]["ask_id"], ask_id);
     assert_eq!(run["open_ask"]["state"], "open");
     assert_eq!(run["open_ask"]["default"], "keep");
-    assert_eq!(run["awaiting_input"], false, "a question is not awaiting_input");
+    assert_eq!(
+        run["awaiting_input"], false,
+        "a question is not awaiting_input"
+    );
     // --terminal ignores questions.
     run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "wait", &id, "--terminal", "--timeout", "1s",
+            "--output",
+            "json",
+            "run",
+            "wait",
+            &id,
+            "--terminal",
+            "--timeout",
+            "1s",
         ]),
         2,
     );
     // An option that does not exist is refused without closing the question.
     let bad = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id.to_string(), "--choice",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--choice",
             "maybe",
         ]),
         1,
@@ -223,15 +243,31 @@ fn worker_asks_parent_waits_answers_and_worker_continues() {
     // An identical repeat answer is a replay; a different one is refused.
     let replay = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id.to_string(), "--choice",
-            "drop", "--decided-by", "person",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--choice",
+            "drop",
+            "--decided-by",
+            "person",
         ]),
         0,
     );
     assert_eq!(replay["data"]["replayed"], true);
     let late = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id.to_string(), "--choice",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--choice",
             "keep",
         ]),
         1,
@@ -248,7 +284,10 @@ fn worker_asks_parent_waits_answers_and_worker_continues() {
     assert!(shown["data"]["open_ask"].is_null());
     assert_eq!(shown["data"]["last_ask"]["outcome"], "answered");
     assert_eq!(shown["data"]["last_ask"]["decided_by"], "person");
-    let listed = run_exit(bin(home.path()).args(["--output", "json", "run", "list"]), 0);
+    let listed = run_exit(
+        bin(home.path()).args(["--output", "json", "run", "list"]),
+        0,
+    );
     assert_eq!(listed["data"]["runs"][0]["last_ask"]["ask_id"], ask_id);
 }
 
@@ -273,19 +312,31 @@ fn pending_reattach_keeps_deadline_and_one_question_per_node() {
     );
     assert_eq!(second["data"]["attached"], true);
     assert_eq!(second["data"]["ask_id"], first["data"]["ask_id"]);
-    assert_eq!(second["data"]["expires_at"], expires, "deadline never moves");
-
-    let other = run_exit(
-        &mut ask(home.path(), &id, "k2", &["--wait", "0s"]),
-        1,
+    assert_eq!(
+        second["data"]["expires_at"], expires,
+        "deadline never moves"
     );
+
+    let other = run_exit(&mut ask(home.path(), &id, "k2", &["--wait", "0s"]), 1);
     assert_eq!(other["error"]["code"], "ask_already_open");
     assert_eq!(other["error"]["details"]["ask_id"], first["data"]["ask_id"]);
 
     let mut conflict = bin(home.path());
     conflict.args([
-        "--output", "json", "node", "ask", &id, "n-0001", "--question", "Something else?",
-        "--default", "stop", "--idempotency-key", "k1", "--wait", "0s",
+        "--output",
+        "json",
+        "node",
+        "ask",
+        &id,
+        "n-0001",
+        "--question",
+        "Something else?",
+        "--default",
+        "stop",
+        "--idempotency-key",
+        "k1",
+        "--wait",
+        "0s",
     ]);
     let conflict = run_exit(&mut conflict, 1);
     assert_eq!(conflict["error"]["code"], "idempotency_conflict");
@@ -294,7 +345,14 @@ fn pending_reattach_keeps_deadline_and_one_question_per_node() {
     // --default is required.
     let mut missing = bin(home.path());
     missing.args([
-        "node", "ask", &id, "n-0001", "--question", "q", "--idempotency-key", "k3",
+        "node",
+        "ask",
+        &id,
+        "n-0001",
+        "--question",
+        "q",
+        "--idempotency-key",
+        "k3",
     ]);
     let out = missing.output().unwrap();
     assert!(!out.status.success());
@@ -308,7 +366,12 @@ fn unanswered_question_times_out_to_default_and_late_answer_is_refused() {
     let home = TestHome::new();
     let id = pending_run(home.path());
     let out = run_exit(
-        &mut ask(home.path(), &id, "t1", &["--timeout", "1s", "--wait", "20s"]),
+        &mut ask(
+            home.path(),
+            &id,
+            "t1",
+            &["--timeout", "1s", "--wait", "20s"],
+        ),
         2,
     );
     assert_eq!(out["data"]["outcome"], "timed_out");
@@ -316,7 +379,14 @@ fn unanswered_question_times_out_to_default_and_late_answer_is_refused() {
     let ask_id = out["data"]["ask_id"].as_u64().unwrap();
     let late = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id.to_string(), "--text",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--text",
             "too late",
         ]),
         1,
@@ -330,10 +400,7 @@ fn unanswered_question_times_out_to_default_and_late_answer_is_refused() {
     assert_eq!(count(home.path(), &id, "node.ask_timed_out"), 1);
     assert_eq!(count(home.path(), &id, "node.answered"), 0);
     // The worker may ask again after the first question closed.
-    let next = run_exit(
-        &mut ask(home.path(), &id, "t2", &["--wait", "0s"]),
-        4,
-    );
+    let next = run_exit(&mut ask(home.path(), &id, "t2", &["--wait", "0s"]), 4);
     assert_ne!(next["data"]["ask_id"], ask_id);
 }
 
@@ -345,7 +412,12 @@ fn expired_question_without_worker_is_closed_by_the_late_answer() {
     let home = TestHome::new();
     let id = pending_run(home.path());
     let first = run_exit(
-        &mut ask(home.path(), &id, "gone", &["--timeout", "1s", "--wait", "0s"]),
+        &mut ask(
+            home.path(),
+            &id,
+            "gone",
+            &["--timeout", "1s", "--wait", "0s"],
+        ),
         4,
     );
     let ask_id = first["data"]["ask_id"].as_u64().unwrap();
@@ -361,7 +433,14 @@ fn expired_question_without_worker_is_closed_by_the_late_answer() {
     );
     let late = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id.to_string(), "--choice",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id.to_string(),
+            "--choice",
             "drop",
         ]),
         1,
@@ -381,7 +460,12 @@ fn escalated_question_stops_returning_wait_and_can_be_answered_later() {
     let home = TestHome::new();
     let id = pending_run(home.path());
     let first = run_exit(
-        &mut ask(home.path(), &id, "e1", &["--timeout", "10m", "--wait", "0s"]),
+        &mut ask(
+            home.path(),
+            &id,
+            "e1",
+            &["--timeout", "10m", "--wait", "0s"],
+        ),
         4,
     );
     let ask_id = first["data"]["ask_id"].as_u64().unwrap().to_string();
@@ -391,8 +475,17 @@ fn escalated_question_stops_returning_wait_and_can_be_answered_later() {
     );
     let esc = run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "escalate", &id, "--ask", &ask_id, "--extend", "4h",
-            "--note", "asked the person",
+            "--output",
+            "json",
+            "run",
+            "escalate",
+            &id,
+            "--ask",
+            &ask_id,
+            "--extend",
+            "4h",
+            "--note",
+            "asked the person",
         ]),
         0,
     );
@@ -406,7 +499,14 @@ fn escalated_question_stops_returning_wait_and_can_be_answered_later() {
     assert!(waited["data"]["runs"][0]["asked"].is_null());
     run_exit(
         bin(home.path()).args([
-            "--output", "json", "run", "answer", &id, "--ask", &ask_id, "--text",
+            "--output",
+            "json",
+            "run",
+            "answer",
+            &id,
+            "--ask",
+            &ask_id,
+            "--text",
             "Keep it one more release.",
         ]),
         0,
@@ -460,11 +560,16 @@ fn answer_racing_the_deadline_leaves_one_closing_event() {
     let home = TestHome::new();
     for round in 0..3 {
         let id = pending_run(home.path());
-        let worker = ask(home.path(), &id, "race", &["--timeout", "1s", "--wait", "20s"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let worker = ask(
+            home.path(),
+            &id,
+            "race",
+            &["--timeout", "1s", "--wait", "20s"],
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
         let ask_id = wait_for_open_ask(home.path(), &id).to_string();
         // Aim at the deadline.
         std::thread::sleep(Duration::from_millis(900 + round * 50));
@@ -486,7 +591,10 @@ fn answer_racing_the_deadline_leaves_one_closing_event() {
             assert_eq!(out.status.code(), Some(2));
             assert_eq!(worker_out["data"]["outcome"], "timed_out");
             let err: Value = serde_json::from_str(
-                String::from_utf8_lossy(&answer.stderr).lines().last().unwrap(),
+                String::from_utf8_lossy(&answer.stderr)
+                    .lines()
+                    .last()
+                    .unwrap(),
             )
             .unwrap();
             assert_eq!(err["error"]["code"], "ask_closed");

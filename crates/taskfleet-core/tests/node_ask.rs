@@ -31,7 +31,8 @@ impl Run {
             json!({"kind": "spinoff", "lifecycle": "autonomous", "title": "t"}),
         )
         .unwrap();
-        run.append("node.created", json!({"kind": "spinoff"})).unwrap();
+        run.append("node.created", json!({"kind": "spinoff"}))
+            .unwrap();
         run
     }
 
@@ -67,9 +68,13 @@ fn ask_opens_once_and_first_closing_event_wins() {
     run.ask("k2");
     assert_eq!(run.node().open_ask.unwrap().ask_id, id);
 
-    run.append("node.answered", json!({"ask_id": id, "choice": "b", "decided_by": "agent"}))
+    run.append(
+        "node.answered",
+        json!({"ask_id": id, "choice": "b", "decided_by": "agent"}),
+    )
+    .unwrap();
+    run.append("node.ask_timed_out", json!({"ask_id": id}))
         .unwrap();
-    run.append("node.ask_timed_out", json!({"ask_id": id})).unwrap();
     let node = run.node();
     assert!(node.open_ask.is_none());
     let last = node.last_ask.unwrap();
@@ -82,10 +87,14 @@ fn ask_opens_once_and_first_closing_event_wins() {
 fn stale_ids_never_close_a_newer_question() {
     let run = Run::new();
     let first = run.ask("k1");
-    run.append("node.ask_timed_out", json!({"ask_id": first})).unwrap();
-    let second = run.ask("k2");
-    run.append("node.answered", json!({"ask_id": first, "answer": "late", "decided_by": "agent"}))
+    run.append("node.ask_timed_out", json!({"ask_id": first}))
         .unwrap();
+    let second = run.ask("k2");
+    run.append(
+        "node.answered",
+        json!({"ask_id": first, "answer": "late", "decided_by": "agent"}),
+    )
+    .unwrap();
     assert_eq!(run.node().open_ask.unwrap().ask_id, second);
     assert_eq!(run.node().last_ask.unwrap().outcome, AskOutcome::TimedOut);
 }
@@ -95,13 +104,19 @@ fn escalation_moves_the_deadline_only_later() {
     let run = Run::new();
     let id = run.ask("k1");
     let before = run.node().open_ask.unwrap().expires_at;
-    run.append("node.ask_escalated", json!({"ask_id": id, "extend_secs": 1}))
-        .unwrap();
+    run.append(
+        "node.ask_escalated",
+        json!({"ask_id": id, "extend_secs": 1}),
+    )
+    .unwrap();
     let open = run.node().open_ask.unwrap();
     assert_eq!(open.expires_at, before, "never earlier");
     assert!(open.escalated_at.is_some());
-    run.append("node.ask_escalated", json!({"ask_id": id, "extend_secs": 3600, "note": "n"}))
-        .unwrap();
+    run.append(
+        "node.ask_escalated",
+        json!({"ask_id": id, "extend_secs": 3600, "note": "n"}),
+    )
+    .unwrap();
     let open = run.node().open_ask.unwrap();
     assert!(open.expires_at > before);
     assert_eq!(open.escalation_note.as_deref(), Some("n"));

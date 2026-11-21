@@ -213,9 +213,11 @@ fn resolve(args: &Args<'_>) -> Result<(RunPaths, NodeId), CliError> {
 }
 
 fn load(paths: &RunPaths, node_id: &NodeId) -> Result<(Manifest, Node), CliError> {
-    let manifest = read_manifest_opt(paths).map_err(from_core)?.ok_or_else(|| {
-        CliError::user("run_not_found", format!("run {} not found", paths.run_id))
-    })?;
+    let manifest = read_manifest_opt(paths)
+        .map_err(from_core)?
+        .ok_or_else(|| {
+            CliError::user("run_not_found", format!("run {} not found", paths.run_id))
+        })?;
     let node = read_node_opt(paths, node_id)
         .map_err(from_core)?
         .ok_or_else(|| {
@@ -255,7 +257,9 @@ fn ask_or_attach(
     let witness = guard.witness();
     let (manifest, node) = load(paths, node_id)?;
     let key = envelope_key(node_id, &args.idempotency_key);
-    if let Some(prior) = find_prior_with_key(&witness, paths, "node.asked", &key).map_err(from_core)? {
+    if let Some(prior) =
+        find_prior_with_key(&witness, paths, "node.asked", &key).map_err(from_core)?
+    {
         let pq = prior.data.get("question").and_then(Value::as_str);
         if prior.node_id.as_deref() != Some(node_id.as_str()) || pq != Some(question) {
             return Err(CliError::user(
@@ -273,7 +277,12 @@ fn ask_or_attach(
                 .data
                 .get(k)
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
                 .unwrap_or_default()
         };
         return Ok(Start::Asked(Asked {
@@ -343,7 +352,10 @@ fn ask_or_attach(
 
 /// One observation of where the question stands.
 enum Seen {
-    Open { expired: bool, expires_at: chrono::DateTime<Utc> },
+    Open {
+        expired: bool,
+        expires_at: chrono::DateTime<Utc>,
+    },
     Closed(Closure),
 }
 

@@ -51,12 +51,12 @@ use jiff::Timestamp;
 use serde_json::Value;
 
 mod ask;
+use ask::cancel_open_ask;
 pub use ask::{
     valid_ask_key, valid_ask_option, valid_ask_text, MAX_ASK_ANSWER_BYTES, MAX_ASK_DEFAULT_BYTES,
     MAX_ASK_KEY_CHARS, MAX_ASK_NOTE_BYTES, MAX_ASK_OPTIONS, MAX_ASK_OPTION_CHARS,
     MAX_ASK_QUESTION_BYTES, MAX_ASK_TIMEOUT_SECS,
 };
-use ask::cancel_open_ask;
 
 use crate::error::{Error, Result};
 use crate::paths::RunPaths;

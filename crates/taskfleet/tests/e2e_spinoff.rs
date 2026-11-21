@@ -967,9 +967,15 @@ exec '{bin}' run merge "$id" --source main --output json > '{merge_out}'
     let waited: Value = serde_json::from_slice(&waited.stdout).unwrap();
     let run = &waited["data"]["runs"][0];
     assert_eq!(run["asked"], true, "{waited}");
-    assert!(matches!(run["status"].as_str(), Some("pending" | "running")));
+    assert!(matches!(
+        run["status"].as_str(),
+        Some("pending" | "running")
+    ));
     let ask_id = run["open_ask"]["ask_id"].as_u64().unwrap().to_string();
-    assert_eq!(run["open_ask"]["options"], serde_json::json!(["keep", "drop"]));
+    assert_eq!(
+        run["open_ask"]["options"],
+        serde_json::json!(["keep", "drop"])
+    );
 
     // A Claude worker cannot receive a live message; the answer goes through
     // the run's event log instead.
@@ -982,38 +988,33 @@ exec '{bin}' run merge "$id" --source main --output json > '{merge_out}'
     assert_eq!(error["error"]["code"], "message_unsupported");
 
     run_ok(command().args([
-        "--output",
-        "json",
-        "run",
-        "answer",
-        &id,
-        "--ask",
-        &ask_id,
-        "--choice",
-        "drop",
+        "--output", "json", "run", "answer", &id, "--ask", &ask_id, "--choice", "drop",
     ]));
     wait_event(&events, "supervisor.exited");
     let manifest: Value =
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(
-        manifest["status"], "done",
+        manifest["status"],
+        "done",
         "stub: {}",
         std::fs::read_to_string(tools.agent_stderr()).unwrap_or_default()
     );
     let asked: Value = serde_json::from_slice(&std::fs::read(&ask_out).unwrap()).unwrap();
     assert_eq!(asked["data"]["outcome"], "answered");
     assert_eq!(asked["data"]["decided_by"], "agent");
-    assert_eq!(
-        git(tools.repo_path(), &["show", "main:DECISION"]),
-        "drop"
-    );
+    assert_eq!(git(tools.repo_path(), &["show", "main:DECISION"]), "drop");
     let kinds: Vec<String> = std::fs::read_to_string(&events)
         .unwrap()
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter_map(|e| e["kind"].as_str().map(str::to_owned))
         .collect();
-    let pos = |k: &str| kinds.iter().position(|x| x == k).unwrap_or_else(|| panic!("{k}: {kinds:?}"));
+    let pos = |k: &str| {
+        kinds
+            .iter()
+            .position(|x| x == k)
+            .unwrap_or_else(|| panic!("{k}: {kinds:?}"))
+    };
     assert!(pos("node.asked") < pos("node.answered"));
     assert!(pos("node.answered") < pos("merge.started"));
     assert!(!kinds.iter().any(|k| k == "node.awaiting_input"));

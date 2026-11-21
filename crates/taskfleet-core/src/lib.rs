@@ -57,11 +57,11 @@ pub use report::{
 };
 pub use schema::aggregate_terminal_status;
 pub use schema::{
-    is_run_id_prefix, AgentOwner, AgentSelection, AskOutcome, AwaitingInput, ChildRef, ClosedAsk, Event, EvidenceStatus,
-    IdValidationError, Kind, Lifecycle, Manifest, MergeTxn, Node, NodeId, OpenAsk, ResidentPolicy,
-    ResidentState, RetainedDisplay, RoundLanding, RoundReport, RunId, SelectedAgentCandidate,
-    SkippedAgentCandidate, Status, TmuxIdentity, TmuxRetentionPolicy, WorkerEvidence, WorkerExit,
-    STATE_SCHEMA_VERSION, SUPPORTED_STATE_SCHEMAS,
+    is_run_id_prefix, AgentOwner, AgentSelection, AskOutcome, AwaitingInput, ChildRef, ClosedAsk,
+    Event, EvidenceStatus, IdValidationError, Kind, Lifecycle, Manifest, MergeTxn, Node, NodeId,
+    OpenAsk, ResidentPolicy, ResidentState, RetainedDisplay, RoundLanding, RoundReport, RunId,
+    SelectedAgentCandidate, SkippedAgentCandidate, Status, TmuxIdentity, TmuxRetentionPolicy,
+    WorkerEvidence, WorkerExit, STATE_SCHEMA_VERSION, SUPPORTED_STATE_SCHEMAS,
 };
 pub use telemetry::{
     parse_telemetry_update, read_all_telemetry, read_all_telemetry_with_clock, read_telemetry,

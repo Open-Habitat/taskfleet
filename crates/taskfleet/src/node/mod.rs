@@ -47,7 +47,11 @@ pub enum NodeAction {
         #[arg(long, conflicts_with = "run_id")]
         current: bool,
         /// The question (at most 8 KiB).
-        #[arg(long, required_unless_present = "question_file", conflicts_with = "question_file")]
+        #[arg(
+            long,
+            required_unless_present = "question_file",
+            conflicts_with = "question_file"
+        )]
         question: Option<String>,
         /// UTF-8 file holding the question.
         #[arg(long)]

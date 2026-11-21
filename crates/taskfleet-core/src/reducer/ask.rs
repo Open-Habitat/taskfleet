@@ -171,7 +171,11 @@ pub(super) fn reduce_node_asked(paths: &RunPaths, ev: &Event) -> Result<Vec<Proj
         Some(Value::Array(values)) => {
             let opts: Option<Vec<String>> = values
                 .iter()
-                .map(|v| v.as_str().filter(|s| valid_ask_option(s)).map(str::to_string))
+                .map(|v| {
+                    v.as_str()
+                        .filter(|s| valid_ask_option(s))
+                        .map(str::to_string)
+                })
                 .collect();
             let opts = opts
                 .filter(|o| o.len() <= MAX_ASK_OPTIONS)
@@ -221,10 +225,7 @@ pub(super) fn reduce_node_asked(paths: &RunPaths, ev: &Event) -> Result<Vec<Proj
     Ok(vec![ProjectionOp::Node(n)])
 }
 
-pub(super) fn reduce_node_ask_escalated(
-    paths: &RunPaths,
-    ev: &Event,
-) -> Result<Vec<ProjectionOp>> {
+pub(super) fn reduce_node_ask_escalated(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>> {
     let events_path = paths.events();
     let node_id = require_envelope_node_id(&events_path, ev)?;
     let id = ask_id(&events_path, ev)?;
@@ -238,7 +239,9 @@ pub(super) fn reduce_node_ask_escalated(
                     corrupt(
                         &events_path,
                         ev,
-                        &format!("`note` must be nonblank text of at most {MAX_ASK_NOTE_BYTES} bytes"),
+                        &format!(
+                            "`note` must be nonblank text of at most {MAX_ASK_NOTE_BYTES} bytes"
+                        ),
                     )
                 })?
                 .to_string(),
@@ -313,10 +316,7 @@ pub(super) fn reduce_node_answered(paths: &RunPaths, ev: &Event) -> Result<Vec<P
     Ok(vec![ProjectionOp::Node(n)])
 }
 
-pub(super) fn reduce_node_ask_timed_out(
-    paths: &RunPaths,
-    ev: &Event,
-) -> Result<Vec<ProjectionOp>> {
+pub(super) fn reduce_node_ask_timed_out(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>> {
     let events_path = paths.events();
     let node_id = require_envelope_node_id(&events_path, ev)?;
     let id = ask_id(&events_path, ev)?;

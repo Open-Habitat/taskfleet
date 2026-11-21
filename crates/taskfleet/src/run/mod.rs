@@ -1375,7 +1375,9 @@ fn read_answer_file(path: &Path) -> Result<String, CliError> {
     let mut bytes = Vec::new();
     f.take(max as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|e| CliError::user("invalid_body_file", format!("read {}: {e}", path.display())))?;
+        .map_err(|e| {
+            CliError::user("invalid_body_file", format!("read {}: {e}", path.display()))
+        })?;
     String::from_utf8(bytes).map_err(|e| {
         CliError::user(
             "invalid_body_file",
