@@ -352,15 +352,6 @@ pub enum RunAction {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Interrupt a resident worker's current round (ADR 0003): stop its
-    /// process the way Esc stops your own turn, keeping worktree, branch,
-    /// uncommitted changes, and native session. Records the round as
-    /// interrupted first (`run wait` settles with `round_interrupted: true`),
-    /// then signals the recorded worker only after re-verifying its start
-    /// identity (Claude SIGINT, Pi SIGTERM; SIGTERM again on a repeat) and
-    /// waits for its told exit. The next `run message` resumes the same
-    /// session. A worker that already reported its round or exited is left
-    /// alone. Example: taskfleet run interrupt proto-login --json
     /// Answer a worker's open question (`node ask`, ADR 0004) and release it.
     /// Exactly one of --text, --body-file, --choice. A question that is no
     /// longer open is refused (`ask_closed`) with how it ended and the default
@@ -407,6 +398,15 @@ pub enum RunAction {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Interrupt a resident worker's current round (ADR 0003): stop its
+    /// process the way Esc stops your own turn, keeping worktree, branch,
+    /// uncommitted changes, and native session. Records the round as
+    /// interrupted first (`run wait` settles with `round_interrupted: true`),
+    /// then signals the recorded worker only after re-verifying its start
+    /// identity (Claude SIGINT, Pi SIGTERM; SIGTERM again on a repeat) and
+    /// waits for its told exit. The next `run message` resumes the same
+    /// session. A worker that already reported its round or exited is left
+    /// alone. Example: taskfleet run interrupt proto-login --json
     Interrupt {
         /// Run id, unambiguous prefix, or resident name (this repository).
         run: String,

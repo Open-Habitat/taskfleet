@@ -20,7 +20,7 @@ the worker can finish alone, creating the run, and telling the caller honestly
 how they will learn the outcome.
 
 The run mechanics are shared with `worktree-spinoff`: native placement, driver flags, profiles, `--notify`, `run wait`, the `landed` flag, the
-awaiting-input signal, and the error codes are documented there and not
+awaiting-input signal, worker questions (`node ask` / `run answer`), and the error codes are documented there and not
 repeated here. If the run / supervisor / node vocabulary is new to you, read
 `taskfleet-overview` first.
 
@@ -86,9 +86,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
@@ -213,11 +215,11 @@ you:
   the target repository is taskfleet.
 - **What a tie means.** If the worker has a lean and delegated decision authority, that is the decision, and the
   ADR records how close it was. If the evidence genuinely cannot separate two
-  options, the choice belongs to the user: the worker records the fork as an
-  awaiting-input signal (the recipe is in `worktree-spinoff`) in case someone is
-  watching, and otherwise closes blocked with the unresolved trade-off in
-  `discussion_items[]`, leaving the branch with its draft and evidence for the
-  user to break the tie and re-spawn or harvest.
+  options, the choice belongs to the user: the worker asks its parent with
+  `node ask` (the recipe is in `worktree-spinoff`), naming "close blocked" as
+  its default, and continues on the answer. With no answer it closes blocked
+  with the unresolved trade-off in `discussion_items[]`, leaving the branch with
+  its draft and evidence for the user to break the tie and re-spawn or harvest.
 - **The closing recipe and the failure-disclosure contract.** Copy the closing
   recipe and copy the disclosure contract below into the brief in full.
 

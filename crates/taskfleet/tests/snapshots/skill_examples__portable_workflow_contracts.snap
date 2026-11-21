@@ -70,9 +70,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.

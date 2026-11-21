@@ -1908,7 +1908,7 @@ fn decision_guidance_ships_without_an_ambient_reply_transport() {
                 .unwrap()
         } else {
             content
-                .split("A worker that hits a genuine human decision")
+                .split("A worker that hits a decision its brief does not settle")
                 .nth(1)
                 .unwrap()
                 .split("### Tool and sub-workflow failure disclosure")

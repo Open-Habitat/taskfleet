@@ -70,36 +70,50 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
 
 ## Decisions during a run
 
-Attention is not a reply channel. `run message` supports only live
-Taskfleet-launched Pi workers with the acknowledged message adapter; Claude,
-caller-owned workers, and older Pi runs without that adapter cannot receive it.
-Headless placement does not add messaging support. Acceptance does not prove
-that Pi read or acted on the message. The exception is a named resident worker
-between rounds (`run create --resident`): any message resumes it, Pi or Claude.
-When the round structure itself is the plan (prototype rounds, analysis then
-fix, a reviewer checking a fix), use one; `/worktree-spinoff` describes when
-and how under "Named support workers". The user never messages it directly;
-you land each round (`run land <name>`) and relay. When a round has gone wrong
-while it runs, `run interrupt <name>` stops it and keeps the worker for the
-next message.
+A worker that meets a decision its brief does not settle asks you, its parent,
+with `taskfleet node ask` and blocks (ADR 0004). This works for Pi, Claude, and
+Codex workers alike. Your default `run wait` returns at once with
+`asked: true` and `open_ask` (question, options, the worker's default, deadline,
+and an `answer_hint`). Decide within the authority the user gave you and answer
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`), then wait again. When the decision is the user's, ask them in
+this conversation and run `taskfleet run escalate <run-id> --ask <id> --extend
+<duration>` first: the question stays open, its deadline moves later, and it
+stops returning `run wait`, so you can keep waiting on the rest of the round.
+Answer with `--decided-by person` once they decide. The user talks only to you;
+the worker never addresses them. A question nobody answers in time ends with the
+worker continuing on its stated default, and a late answer is refused and names
+that default, so report it rather than assume your answer landed.
 
-Keep autonomous Claude profiles available. For non-Pi or headless briefs,
-pre-authorize safe defaults and require a terminal `success: false` report with
-`discussion_items` when a new decision exceeds that authority, preserving work
-without merging. Read the report, get the decision, then respawn with the answer
-and preserved branch to harvest; do not wait for an impossible live reply.
-`node.input_resolved` only clears a matching attention generation: it is neither
-delivery nor approval. Even for Pi, continue only on an actually received,
-authorized decision or an already authorized default, not a cleared signal.
+Write briefs that keep questions rare: pre-authorize safe defaults, say which
+decisions to ask about, and name the ones with no acceptable default, which
+still end in a terminal `success: false` report with `discussion_items`,
+preserving work without merging. For those, read the report, get the decision,
+then respawn with the answer and the preserved branch to harvest.
+
+`run message` is not how questions are answered. It supports only live
+Taskfleet-launched Pi workers with the acknowledged message adapter, and
+acceptance does not prove that Pi read or acted on it. The exception is a named
+resident worker between rounds (`run create --resident`): any message resumes
+it, Pi or Claude. When the round structure itself is the plan (prototype rounds,
+analysis then fix, a reviewer checking a fix), use one; `/worktree-spinoff`
+describes when and how under "Named support workers". The user never messages
+it directly; you land each round (`run land <name>`) and relay. When a round has
+gone wrong while it runs, `run interrupt <name>` stops it and keeps the worker
+for the next message. `node.awaiting_input` is a prompt waiting at the worker
+itself; `node.input_resolved` only clears it and is neither delivery nor
+approval.
 
 ## Runtime capabilities
 

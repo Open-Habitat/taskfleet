@@ -2,43 +2,49 @@
 source: crates/taskfleet/tests/skill.rs
 expression: decision
 ---
- uses a safe default only if already
-authorized by the brief or repository policy. Otherwise it preserves work and
-submits a terminal `success: false` report with the decision in `discussion_items`
-through `taskfleet node report`, without merging. The caller can decide and
-respawn with that answer and the preserved branch in the new brief. Do not wait
-indefinitely for a reply the harness cannot receive.
+ asks its parent and
+blocks on the answer (ADR 0004). It is a plain shell command, so it works the
+same for Pi, Claude, and Codex workers:
+
+```bash
+taskfleet node ask --current --json \
+  --question "<the decision and the context the parent needs>" \
+  --option "<choice>" --option "<choice>" \
+  --default "<what the worker does if nobody answers; something the brief allows>" \
+  --timeout 30m --wait 8m --idempotency-key "<stable-key-for-this-question>"
+```
+
+Exit `0` (`answered`): continue on `data.take`. Exit `4` (`pending`): `--wait`
+elapsed; run the identical command again, which re-attaches by key and never
+moves the deadline. Exit `2` (`timed_out`): nobody answered in time; continue on
+the default, repeated in `data.take`. Exit `3` (`cancelled`): the run or node
+ended; stop, preserve work, do not merge. One question is open at a time; a
+second is refused and names the open one. `--option` is optional, and "stop and
+report the decision" is a valid default. The final report names each decision
+taken by default and each one the parent made (`data.decided_by` says whether
+the parent stated that a person decided).
+
+The parent is whoever waits on the run. Its default `run wait` returns at once
+for a new question with `asked: true` and `open_ask` (id, question, options,
+default, deadline, and a copyable `answer_hint`). Answer with
+`taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>` (or
+`--text` / `--body-file`; add `--decided-by person` when the person you work
+with made the call), then wait again. When you have to take the question to the
+person and that will take a while, `taskfleet run escalate <run-id> --ask <id>
+--extend 4h` keeps it open, moves its deadline later, and stops it from
+returning `run wait`. The person never talks to the worker; you relay. An answer
+after the deadline is refused and names the default the worker took.
+
+A decision with no acceptable default still ends the run: the worker preserves
+work and submits a terminal `success: false` report with the decision in
+`discussion_items` through `taskfleet node report`, without merging. The caller
+can decide and respawn with that answer and the preserved branch in the new
+brief.
 
 `run message` delivers only to live Taskfleet-launched Pi workers with the
-acknowledged message adapter. Claude, caller-owned workers, and older Pi runs
-without that adapter are unsupported, including in headless placement. An
-accepted message is not proof it was read or acted on.
-
-When useful, record the fork as durable attention state before taking the
-authorized-default or terminal-report path. Write report-shaped discussion
-items (`topic`, non-empty string `options`, `recommended_default`) to a file
-shaped `{"discussion_items":[…]}` and open the signal:
-
-```bash
-taskfleet event create "$run_id" --kind node.awaiting_input --node-id n-0001 \
-  --from-file /tmp/awaiting-input-${run_id}.json \
-  --idempotency-key "awaiting-input:${run_id}:<short-topic>"
-request_seq="$(taskfleet run show "$run_id" --output json | jq -r '.data.awaiting_input_detail.event_seq')"
-```
-
-`run show` and `run list` show it immediately; after three minutes
-(`TASKFLEET_AWAITING_INPUT_GRACE_SECS` overrides) `run wait` settles and a
-registered `--notify` hook fires with `TASKFLEET_STATUS=awaiting-input`. The
-worker may proceed only on a safe default already authorized by the brief or
-repository policy, never merely because time elapsed, closing the signal with the generation it opened:
-
-```bash
-printf '{"event_seq":%s}\n' "$request_seq" > /tmp/input-resolved-${run_id}.json
-taskfleet event create "$run_id" --kind node.input_resolved --node-id n-0001 \
-  --from-file /tmp/input-resolved-${run_id}.json
-```
-
-A fork resolved by other evidence is closed the same way before continuing.
-`node.input_resolved` only clears the matching attention generation; it neither
-delivers an answer nor grants approval. A Pi worker may continue on an actually
-received, authorized decision, not on an attention clear or adapter receipt alone.
+acknowledged message adapter, and to named residents between rounds; it is not
+how questions are answered, and an accepted message is not proof it was read or
+acted on. `node.awaiting_input` remains the signal for a prompt that waits at
+the worker itself (such as a Claude permission prompt): `run wait` reports it
+after a three-minute grace, and `node.input_resolved` only clears it. Neither
+carries an answer back.

@@ -88,9 +88,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
@@ -237,34 +239,29 @@ reads `pending` for a moment after the merge.
 ### Decision forks
 
 Nobody is watching an autonomous worker, so a worker that stops at an
-interactive prompt looks exactly like a hung run. A genuine human decision is
-recorded as durable run state instead. The worker writes report-shaped
-discussion items (`topic`, non-empty string `options`, `recommended_default`)
-to a file shaped `{"discussion_items":[…]}` and opens the signal:
+interactive prompt looks exactly like a hung run. A decision the brief does not
+settle goes to the parent as a blocking question instead (ADR 0004), with a
+default the brief allows:
 
 ```bash
-taskfleet event create "$run_id" --kind node.awaiting_input --node-id n-0001 \
-  --from-file /tmp/awaiting-input-${run_id}.json \
-  --idempotency-key "awaiting-input:${run_id}:<short-topic>"
-request_seq="$(taskfleet run show "$run_id" --output json | jq -r '.data.awaiting_input_detail.event_seq')"
+taskfleet node ask --current --json \
+  --question "<the decision and the context the parent needs>" \
+  --option "<choice>" --option "<choice>" \
+  --default "<what the worker does if nobody answers>" \
+  --timeout 30m --wait 8m --idempotency-key "<stable-key-for-this-question>"
 ```
 
-`run show` and `run list` show it at once; after three minutes
-(`TASKFLEET_AWAITING_INPUT_GRACE_SECS` overrides) `run wait` settles and a
-registered `--notify` hook fires with `TASKFLEET_STATUS=awaiting-input`. The
-worker may proceed only on a safe default already authorized by the brief or
-repository policy, never merely because time elapsed, closing the signal
-with the generation it opened:
+Exit `0`: continue on `data.take` (the answer). Exit `4`: still pending; re-run
+the identical command (the deadline does not move). Exit `2`: timed out;
+continue on the default in `data.take`. Exit `3`: cancelled; stop without
+merging. The final report names decisions taken by default. The parent's
+default `run wait` returns at once with `asked: true` and `open_ask`; it answers
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) and waits again.
 
-```bash
-printf '{"event_seq":%s}\n' "$request_seq" > /tmp/input-resolved-${run_id}.json
-taskfleet event create "$run_id" --kind node.input_resolved --node-id n-0001 \
-  --from-file /tmp/input-resolved-${run_id}.json
-```
-
-When no default is safe, it submits a terminal blocked report instead
-(`success: false`, the same `discussion_items`) through `node report`. A fork
-resolved by other evidence is closed the same way before continuing.
+When no default is acceptable, the worker submits a terminal blocked report
+instead (`success: false`, the decision in `discussion_items`) through
+`node report`, preserving work without merging.
 
 ## Tool and sub-workflow failure disclosure
 

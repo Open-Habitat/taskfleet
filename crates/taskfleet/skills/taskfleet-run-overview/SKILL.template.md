@@ -62,9 +62,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
@@ -184,6 +186,22 @@ each has a different remedy:
   auto-answered. Existing runs, disabled hooks, auth/trust before session startup,
   and unsupported harness signals can remain unknown; use bounded check-ins.
   See `docs/CLAUDE-PROMPT-SIGNALS.md` for coverage and limitations.
+- `open_ask` — the worker asked its parent a blocking question with
+  `taskfleet node ask` (ADR 0004) and waits for the answer; present only while
+  one is open. It carries `ask_id`, `question`, `options`, the worker's
+  `default`, `asked_at`, `expires_at`, `remaining_secs`, `state` (`open`,
+  `escalated` once the parent passed it to a person, or `expired` when the
+  deadline passed and the worker takes its default), and a copyable
+  `answer_hint`. The answer belongs to the parent agent, not to the person
+  directly: `run answer <run-id> --ask <ask_id> --choice <option>` (or
+  `--text` / `--body-file`, with `--decided-by person` when the person decided)
+  releases the worker; `run escalate <run-id> --ask <ask_id> --extend 4h`
+  keeps it open longer while you ask. A question is not `awaiting_input`.
+- `last_ask` — how the most recent question ended: `outcome` `answered`,
+  `timed_out` (`took_default: true`: the worker continued on its default), or
+  `cancelled` (the node ended first), with the answer and `decided_by` when
+  answered. A late `run answer` is refused with `ask_closed` and names the
+  default taken.
 
 ## What `run show` adds
 
@@ -246,7 +264,8 @@ Waiting can cover several ids, so its shape differs from `run show`:
 `data.runs[]` (`run_id`, `status`, `merged`, `report_only`, `landed`,
 `landed_method`, `stalled`, `attention_required`, `awaiting_input`,
 `preserved_work`, plus `summary`, `error`, `attention`,
-`awaiting_input_detail`, and `recoverable_work` when present). There
+`awaiting_input_detail`, `asked`, `open_ask`, `last_ask`, and
+`recoverable_work` when present). There
 is no `data.status`; read the runs array. Read `outcome` first: `timed-out` is
 not completion, and the field is authoritative even when a pipeline swallowed
 the exit code. Exit codes are `0` condition met, `1` usage or unknown run,
@@ -267,7 +286,10 @@ the parent environment and works with the same host-neutral waiting guidance abo
 
 A run *settles* the wait when it goes terminal or when it can no longer
 progress on its own: stalled, attention-required, or awaiting input past a
-short grace. A named resident run also settles, at once, when its worker
+short grace. An open worker question settles it at once, with no grace:
+`asked: true` and `open_ask` say what to answer. That is not an error and
+never trips `--fail-on-error`; answer it (or escalate it) and wait again. An
+escalated or expired question does not settle the wait. A named resident run also settles, at once, when its worker
 reports a round: `round_reported: true` and the round summary in
 `resident.last_round`. That is not an error and never trips
 `--fail-on-error`; land the round (`run land <name>`) and send the next
@@ -280,7 +302,7 @@ first settled run; `--all` (the default) waits for every one.
 
 If you have already received the attention signal and need the eventual
 terminal result, use `--terminal`: it ignores non-terminal attention (including
-an already-escalated open decision) for settling, but still shows current hints
+an already-escalated open decision and worker questions) for settling, but still shows current hints
 in `data.runs[]`. It does not resolve the decision for the worker. `--any --terminal` returns when the first
 run is terminal; `--fail-on-error` grades terminal outcomes, not an unfinished
 sibling's attention signal. Timeout still exits `2`.

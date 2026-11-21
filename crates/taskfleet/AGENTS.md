@@ -242,7 +242,9 @@ Every materialized prompt gets a preamble from
 `harness::prompt::worker_prompt_preamble`. It is the right place for worker
 policy because it is the only text that knows the exact run id and reaches
 workers launched from a custom `--task` or `--prompt-file`, which no bundled
-skill does. Today it carries the closing identity and the issue-filing
+skill does. Today it carries the closing identity, the decision path (ask the
+parent with `node ask` and continue on the answer or the stated default, ADR
+0004), and the issue-filing
 boundary (worker-filed issues go through `issuectl intake file`, are born
 unlaned, and carry machine-visible `ai-review` provenance), plus, for pi
 research workers only, the translation shim for Claude-flavoured briefs and

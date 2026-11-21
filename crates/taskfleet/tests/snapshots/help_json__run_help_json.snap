@@ -108,6 +108,14 @@ expression: value
     "positionals": [],
     "subcommands": [
       {
+        "command": "taskfleet run answer",
+        "about": "Answer a worker's open question (`node ask`, ADR 0004) and release it. Exactly one of --text, --body-file, --choice. A question that is no longer open is refused (`ask_closed`) with how it ended and the default the worker took; an identical repeat of the recorded answer is a replay. Example: taskfleet run answer <run-id> --ask 42 --choice drop --json",
+        "aliases": [],
+        "hidden": false,
+        "deprecated": false,
+        "has_subcommands": false
+      },
+      {
         "command": "taskfleet run attach",
         "about": "View the exact recorded worker display read-only (outside tmux only). Default: native terminal client. --json or --output json|jsonl validates and returns a descriptor without attaching. Never creates a tmux server. Example: taskfleet run attach 01arz3ndektsv4rrffq69g5fav --json",
         "aliases": [],
@@ -134,6 +142,14 @@ expression: value
       {
         "command": "taskfleet run discard",
         "about": "Remove a failed/cancelled node's retained work after durable authorization. Caller-owned runs require --force and --settlement-key; never changes status",
+        "aliases": [],
+        "hidden": false,
+        "deprecated": false,
+        "has_subcommands": false
+      },
+      {
+        "command": "taskfleet run escalate",
+        "about": "Say you passed a worker's open question on to a person: the question stays open, stops returning `run wait`, and with --extend its deadline moves later (never earlier). Answer it later with `run answer`. Example: taskfleet run escalate <run-id> --ask 42 --extend 4h --json",
         "aliases": [],
         "hidden": false,
         "deprecated": false,

@@ -9,11 +9,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A worker can ask its parent agent a blocking question (`worker-question-to-parent`, ADR 0004). `node ask (--current | <run> <node>) --question … --default … [--option …] [--timeout 30m] [--wait 8m] --idempotency-key …` records `node.asked` and blocks: exit 0 `answered` (act on `data.take`), 4 `pending` (re-run with the same key; the deadline never moves), 2 `timed_out` (continue on the default, recorded as `node.ask_timed_out`), 3 `cancelled` (the node ended). The parent answers with `run answer <run> --ask <id> (--text | --body-file | --choice) [--decided-by agent|person]` or passes the question to a person with `run escalate <run> --ask <id> [--extend 4h] [--note …]`. A default `run wait` returns at once on an open, non-escalated question (`asked: true`, `open_ask`); `run show`, `run list` and `run wait` expose `open_ask` and `last_ask`. One question per node; the first closing event wins; a late answer is refused with `ask_closed` and names the default taken. Plain shell commands, so Pi, Claude and Codex workers all use it.
+
 ### Changed
 
 - Timestamps are handled with `jiff` instead of the now-unmaintained `chrono` (RUSTSEC-2026-0543), and human durations (`run wait --timeout`, `--poll-interval`, `--check-in`, `tmux.completed_window_ttl`) are parsed by a small local parser instead of the unmaintained `humantime` (RUSTSEC-2026-0542), accepting the same units including days and weeks (`cargo-deny-advisories-2026-11`). Stored and JSON timestamps stay RFC 3339 UTC and existing run state reads unchanged; fractional seconds are now printed with the fewest digits needed, and text-mode output and `event tail` print the RFC 3339 `…Z` form instead of `YYYY-MM-DD HH:MM:SS UTC` / `+00:00`. `taskfleet-core`'s public timestamp fields are now `jiff::Timestamp`.
 
 - Replace unmaintained `chrono` and `humantime` dependencies (`cargo-deny-advisories-2026-11`).
+
+- The generated worker preamble and the bundled skills (`worktree-spinoff`, `taskfleet-spawn-spinoff`, `worktree-technical-decision`, `stint-start`, `fan-out`, `taskfleet-run-overview` and the shared wait guidance) tell workers to ask with `node ask` and parents to answer with `run answer`; a terminal `success: false` report remains for a decision with no acceptable default.
 
 ### Fixed
 

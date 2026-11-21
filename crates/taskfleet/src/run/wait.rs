@@ -1484,6 +1484,9 @@ mod tests {
             round_reported: false,
             round_interrupted: false,
             resident: None,
+            asked: false,
+            open_ask: None,
+            last_ask: None,
         };
         let mk_round = || RunOutcome {
             round_reported: true,

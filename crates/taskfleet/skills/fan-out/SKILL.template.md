@@ -88,9 +88,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
@@ -277,7 +279,12 @@ The driver brief is the whole operating manual of the batch. It contains:
   `run merge` is a failed attempt, cancelled with `run cancel <child-run-id>`
   so its branch is preserved; a child awaiting input in an autonomous batch
   has hit a brief gap, which is also a failed attempt. Only then does the
-  slot free.
+  slot free. A child that asks the driver a question (`asked: true`, ADR 0004)
+  is different: it is blocked on you, not stuck. Answer `open_ask` within the
+  batch brief's authority with `taskfleet run answer <child-run-id> --ask
+  <open_ask.ask_id> --choice <option>` (or `--text`) and keep it in the live
+  set; a question outside that authority is answered with the unit's stated
+  default or escalated to the caller, never guessed.
 - **The retry budget**: a finite whole-unit count, stated as total attempts
   or as retries after the first, each attempt with a fresh idempotency key.
   A child's own bounded tool retries are separate. At exhaustion the unit is

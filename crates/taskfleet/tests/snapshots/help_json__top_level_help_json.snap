@@ -1528,6 +1528,381 @@ expression: value
         "positionals": [],
         "subcommands": [
           {
+            "command": "taskfleet node ask",
+            "about": "Ask the parent agent a blocking question and wait for its answer (ADR 0004). Works from any harness that can run a shell command",
+            "long_about": "Ask the parent agent a blocking question and wait for its answer (ADR 0004). Works from any harness that can run a shell command.\n\nThe first call records the question and fixes its deadline (`--timeout`); `--wait` bounds this one invocation. Re-run with the same `--idempotency-key` to re-attach; the deadline never moves. Exit 0 `answered` (act on `data.take`), 4 `pending` (re-run with the same key), 2 `timed_out` (continue on your default, repeated in `data.take`, and name that in your final report), 3 `cancelled` (stop; do not merge), 1 usage error or a second question while one is open. Example: taskfleet node ask --current --question \"Drop the v1 API?\" --option keep --option drop --default keep --idempotency-key api-v1 --json",
+            "aliases": [],
+            "hidden": false,
+            "deprecated": false,
+            "flags": [
+              {
+                "name": "current",
+                "long": "current",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Resolve the run from the current worktree, as `run show --current` does; the node defaults to n-0001",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "false"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [
+                  "run_id"
+                ],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "default",
+                "long": "default",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "What you will do if nobody answers. Must be something your brief already allows, which may be \"stop and report the decision\"",
+                "value_names": [
+                  "DEFAULT"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": true,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "help",
+                "long": "help",
+                "short": "h",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Print help (see more with '--help')",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "idempotency_key",
+                "long": "idempotency-key",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Stable key for this question; re-asking with it re-attaches",
+                "value_names": [
+                  "IDEMPOTENCY_KEY"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": true,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "json",
+                "long": "json",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Emit one pretty JSON document to stdout. Shorthand for `--output json` to stdout",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "false"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "options",
+                "long": "option",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "A named choice the parent may pick with `run answer --choice`. Repeat for several (at most 16)",
+                "value_names": [
+                  "OPTIONS"
+                ],
+                "takes_value": true,
+                "multiple": true,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": true,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "output",
+                "long": "output",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Output format. `jsonl` (default) emits one compact JSON envelope per line on stdout — AI-first. `json` emits a single pretty document. `text` emits a human-readable summary. A path-shaped value (`./out.json`, `./out.jsonl`) routes the machine envelope to that file (the format is inferred from the extension)",
+                "value_names": [
+                  "FMT|PATH"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "jsonl"
+                ],
+                "accepted_values": [
+                  "json",
+                  "jsonl",
+                  "text"
+                ],
+                "accepts_file_paths": true,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "question",
+                "long": "question",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "The question (at most 8 KiB)",
+                "value_names": [
+                  "QUESTION"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [
+                  "question_file"
+                ],
+                "requires": [],
+                "required_unless_present": [
+                  "question_file"
+                ],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "question_file",
+                "long": "question-file",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "UTF-8 file holding the question",
+                "value_names": [
+                  "QUESTION_FILE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": true,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "timeout",
+                "long": "timeout",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Deadline, set once when the question is first asked (e.g. 30m, 2h)",
+                "value_names": [
+                  "TIMEOUT"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "30m"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "wait",
+                "long": "wait",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "How long this invocation blocks before returning `pending` (exit 4). Keep it under your harness's command time limit",
+                "value_names": [
+                  "WAIT"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "8m"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              }
+            ],
+            "positionals": [
+              {
+                "name": "run_id",
+                "help": "Exact run id (or pass --current)",
+                "value_names": [
+                  "RUN_ID"
+                ],
+                "index": 1,
+                "required": false,
+                "multiple": false,
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "defaults": [],
+                "deprecated": false
+              },
+              {
+                "name": "node_id",
+                "help": "Node id, e.g. n-0001 (or pass --current)",
+                "value_names": [
+                  "NODE_ID"
+                ],
+                "index": 2,
+                "required": false,
+                "multiple": false,
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "defaults": [],
+                "deprecated": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
             "command": "taskfleet node list",
             "about": "List nodes belonging to a run",
             "aliases": [],
@@ -2796,6 +3171,312 @@ expression: value
         ],
         "positionals": [],
         "subcommands": [
+          {
+            "command": "taskfleet run answer",
+            "about": "Answer a worker's open question (`node ask`, ADR 0004) and release it. Exactly one of --text, --body-file, --choice. A question that is no longer open is refused (`ask_closed`) with how it ended and the default the worker took; an identical repeat of the recorded answer is a replay. Example: taskfleet run answer <run-id> --ask 42 --choice drop --json",
+            "aliases": [],
+            "hidden": false,
+            "deprecated": false,
+            "flags": [
+              {
+                "name": "ask_id",
+                "long": "ask",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "The question id (`open_ask.ask_id` in `run wait` / `run show`)",
+                "value_names": [
+                  "ASK_ID"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": true,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "body_file",
+                "long": "body-file",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "UTF-8 file holding the answer",
+                "value_names": [
+                  "BODY_FILE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": true,
+                "conflicts_with": [
+                  "choice"
+                ],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "choice",
+                "long": "choice",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "One of the question's options",
+                "value_names": [
+                  "CHOICE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "decided_by",
+                "long": "decided-by",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Your own statement of who made the decision: `agent` (you judged) or `person` (the person you work with decided). Unverified; it grants the worker nothing its brief did not",
+                "value_names": [
+                  "DECIDED_BY"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "agent"
+                ],
+                "accepted_values": [
+                  "agent",
+                  "person"
+                ],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "help",
+                "long": "help",
+                "short": "h",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Print help",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "json",
+                "long": "json",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Emit one pretty JSON document to stdout. Shorthand for `--output json` to stdout",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "false"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "node",
+                "long": "node",
+                "long_aliases": [],
+                "short_aliases": [],
+                "value_names": [
+                  "NODE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "n-0001"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "output",
+                "long": "output",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Output format. `jsonl` (default) emits one compact JSON envelope per line on stdout — AI-first. `json` emits a single pretty document. `text` emits a human-readable summary. A path-shaped value (`./out.json`, `./out.jsonl`) routes the machine envelope to that file (the format is inferred from the extension)",
+                "value_names": [
+                  "FMT|PATH"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "jsonl"
+                ],
+                "accepted_values": [
+                  "json",
+                  "jsonl",
+                  "text"
+                ],
+                "accepts_file_paths": true,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "text",
+                "long": "text",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Free-text answer (at most 16 KiB)",
+                "value_names": [
+                  "TEXT"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [
+                  "body_file",
+                  "choice"
+                ],
+                "requires": [],
+                "required_unless_present": [
+                  "body_file",
+                  "choice"
+                ],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              }
+            ],
+            "positionals": [
+              {
+                "name": "run_id",
+                "help": "Run id, unambiguous prefix, or resident name (this repository)",
+                "value_names": [
+                  "RUN_ID"
+                ],
+                "index": 1,
+                "required": true,
+                "multiple": false,
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "defaults": [],
+                "deprecated": false
+              }
+            ],
+            "subcommands": []
+          },
           {
             "command": "taskfleet run attach",
             "about": "View the exact recorded worker display read-only (outside tmux only). Default: native terminal client. --json or --output json|jsonl validates and returns a descriptor without attaching. Never creates a tmux server. Example: taskfleet run attach 01arz3ndektsv4rrffq69g5fav --json",
@@ -4178,6 +4859,240 @@ expression: value
             "positionals": [
               {
                 "name": "run_id",
+                "value_names": [
+                  "RUN_ID"
+                ],
+                "index": 1,
+                "required": true,
+                "multiple": false,
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "defaults": [],
+                "deprecated": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "command": "taskfleet run escalate",
+            "about": "Say you passed a worker's open question on to a person: the question stays open, stops returning `run wait`, and with --extend its deadline moves later (never earlier). Answer it later with `run answer`. Example: taskfleet run escalate <run-id> --ask 42 --extend 4h --json",
+            "aliases": [],
+            "hidden": false,
+            "deprecated": false,
+            "flags": [
+              {
+                "name": "ask_id",
+                "long": "ask",
+                "long_aliases": [],
+                "short_aliases": [],
+                "value_names": [
+                  "ASK_ID"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": true,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "extend",
+                "long": "extend",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Move the deadline to at least now + this (e.g. 4h; at most 7d)",
+                "value_names": [
+                  "EXTEND"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "help",
+                "long": "help",
+                "short": "h",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Print help",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "json",
+                "long": "json",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Emit one pretty JSON document to stdout. Shorthand for `--output json` to stdout",
+                "value_names": [],
+                "takes_value": false,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "false"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 0,
+                  "max": 0,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "node",
+                "long": "node",
+                "long_aliases": [],
+                "short_aliases": [],
+                "value_names": [
+                  "NODE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "n-0001"
+                ],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "note",
+                "long": "note",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Short note recorded with the escalation",
+                "value_names": [
+                  "NOTE"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": false,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [],
+                "accepted_values": [],
+                "accepts_file_paths": false,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              },
+              {
+                "name": "output",
+                "long": "output",
+                "long_aliases": [],
+                "short_aliases": [],
+                "help": "Output format. `jsonl` (default) emits one compact JSON envelope per line on stdout — AI-first. `json` emits a single pretty document. `text` emits a human-readable summary. A path-shaped value (`./out.json`, `./out.jsonl`) routes the machine envelope to that file (the format is inferred from the extension)",
+                "value_names": [
+                  "FMT|PATH"
+                ],
+                "takes_value": true,
+                "multiple": false,
+                "required": false,
+                "is_global": true,
+                "hidden": false,
+                "deprecated": false,
+                "defaults": [
+                  "jsonl"
+                ],
+                "accepted_values": [
+                  "json",
+                  "jsonl",
+                  "text"
+                ],
+                "accepts_file_paths": true,
+                "conflicts_with": [],
+                "requires": [],
+                "required_unless_present": [],
+                "arity": {
+                  "min": 1,
+                  "max": 1,
+                  "repeated": false,
+                  "multi_value": false,
+                  "require_equals": false
+                }
+              }
+            ],
+            "positionals": [
+              {
+                "name": "run_id",
+                "help": "Run id, unambiguous prefix, or resident name (this repository)",
                 "value_names": [
                   "RUN_ID"
                 ],
@@ -7997,7 +8912,7 @@ expression: value
                 "long": "terminal",
                 "long_aliases": [],
                 "short_aliases": [],
-                "help": "Wait only for terminal status, ignoring non-terminal attention signals (including awaiting input). Default wait still wakes once for attention",
+                "help": "Wait only for terminal status, ignoring non-terminal attention signals (including awaiting input and worker questions). Default wait still wakes for attention, and at once for an open `node ask` question (`asked: true`, `open_ask`): answer it with `run answer`",
                 "value_names": [],
                 "takes_value": false,
                 "multiple": false,

@@ -10,9 +10,10 @@ schema_version: 1
 
 A spinoff is one autonomous agent in its own git worktree, doing one well-scoped
 task and merging itself back to the source branch with `taskfleet run merge`.
-Nobody reviews it interactively. Write the brief so it can finish without a live
-reply; attention signals can surface decisions, but not every harness can receive
-an answer. Your job is therefore mostly writing: decide that the task is
+Nobody reviews it interactively. Write the brief so it can finish alone; a worker
+can still ask you a blocking question with `taskfleet node ask`, which you answer
+with `taskfleet run answer`, but every question is a round trip through you, so
+pre-authorize what you can. Your job is therefore mostly writing: decide that the task is
 spinoff-shaped, write a brief the worker can finish alone, create the run through
 `taskfleet`, and tell the caller honestly how they will learn the outcome.
 
@@ -84,9 +85,11 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, or awaiting-input can settle a wait without a terminal success. Resolve
-that condition; `--terminal` waits for the eventual terminal result but answers
-no decision. Then read `taskfleet run show <run-id> --output json` for the full
+stall, awaiting-input, or a worker's question can settle a wait without a
+terminal success. Resolve that condition; a question (`asked: true`) is answered
+with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
+(or `--text`) before waiting again. `--terminal` waits for the eventual terminal
+result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full
 `data.report`, `landed`, `landed_method`, and `preserved_work`. A settled run,
 clean worker exit, visible UI entry, or disappearing window is not merge proof.
 Taskfleet's CLI and supervisor retain merge, reporting, and teardown authority.
@@ -280,10 +283,11 @@ Everything else the worker needs is yours to supply:
 
 - **Goal.** One sentence on what to deliver.
 - **Context.** Files, modules, constraints, relative paths.
-- **Decision authority.** Pre-authorize safe defaults, especially for non-Pi or
-  headless work. Name decisions that require preserved-work escalation instead
-  of guessing. Claude remains supported for autonomous work; it has no live
-  `run message` reply channel.
+- **Decision authority.** Pre-authorize safe defaults. Say which decisions the
+  worker should ask you about with `node ask` (it states a default the brief
+  allows and blocks until you answer or the deadline passes) and which have no
+  acceptable default and so end in preserved-work escalation. This works the
+  same for Pi, Claude, and Codex workers.
 - **Done criteria**, concrete and verifiable. Copy the repository's exact
   green-gate commands from its `AGENTS.md` rather than paraphrasing: a debug build
   or a looser warning policy passes in the worktree and turns `main` red. A
@@ -384,46 +388,52 @@ For the completed path, once the work is committed:
    stays live: resolve the conflict (or `/complex-rebase` for a deeply diverged
    branch) and re-run the same `run merge` command.
 
-A worker that hits a genuine human decision uses a safe default only if already
-authorized by the brief or repository policy. Otherwise it preserves work and
-submits a terminal `success: false` report with the decision in `discussion_items`
-through `taskfleet node report`, without merging. The caller can decide and
-respawn with that answer and the preserved branch in the new brief. Do not wait
-indefinitely for a reply the harness cannot receive.
+A worker that hits a decision its brief does not settle asks its parent and
+blocks on the answer (ADR 0004). It is a plain shell command, so it works the
+same for Pi, Claude, and Codex workers:
+
+```bash
+taskfleet node ask --current --json \
+  --question "<the decision and the context the parent needs>" \
+  --option "<choice>" --option "<choice>" \
+  --default "<what the worker does if nobody answers; something the brief allows>" \
+  --timeout 30m --wait 8m --idempotency-key "<stable-key-for-this-question>"
+```
+
+Exit `0` (`answered`): continue on `data.take`. Exit `4` (`pending`): `--wait`
+elapsed; run the identical command again, which re-attaches by key and never
+moves the deadline. Exit `2` (`timed_out`): nobody answered in time; continue on
+the default, repeated in `data.take`. Exit `3` (`cancelled`): the run or node
+ended; stop, preserve work, do not merge. One question is open at a time; a
+second is refused and names the open one. `--option` is optional, and "stop and
+report the decision" is a valid default. The final report names each decision
+taken by default and each one the parent made (`data.decided_by` says whether
+the parent stated that a person decided).
+
+The parent is whoever waits on the run. Its default `run wait` returns at once
+for a new question with `asked: true` and `open_ask` (id, question, options,
+default, deadline, and a copyable `answer_hint`). Answer with
+`taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>` (or
+`--text` / `--body-file`; add `--decided-by person` when the person you work
+with made the call), then wait again. When you have to take the question to the
+person and that will take a while, `taskfleet run escalate <run-id> --ask <id>
+--extend 4h` keeps it open, moves its deadline later, and stops it from
+returning `run wait`. The person never talks to the worker; you relay. An answer
+after the deadline is refused and names the default the worker took.
+
+A decision with no acceptable default still ends the run: the worker preserves
+work and submits a terminal `success: false` report with the decision in
+`discussion_items` through `taskfleet node report`, without merging. The caller
+can decide and respawn with that answer and the preserved branch in the new
+brief.
 
 `run message` delivers only to live Taskfleet-launched Pi workers with the
-acknowledged message adapter. Claude, caller-owned workers, and older Pi runs
-without that adapter are unsupported, including in headless placement. An
-accepted message is not proof it was read or acted on.
-
-When useful, record the fork as durable attention state before taking the
-authorized-default or terminal-report path. Write report-shaped discussion
-items (`topic`, non-empty string `options`, `recommended_default`) to a file
-shaped `{"discussion_items":[…]}` and open the signal:
-
-```bash
-taskfleet event create "$run_id" --kind node.awaiting_input --node-id n-0001 \
-  --from-file /tmp/awaiting-input-${run_id}.json \
-  --idempotency-key "awaiting-input:${run_id}:<short-topic>"
-request_seq="$(taskfleet run show "$run_id" --output json | jq -r '.data.awaiting_input_detail.event_seq')"
-```
-
-`run show` and `run list` show it immediately; after three minutes
-(`TASKFLEET_AWAITING_INPUT_GRACE_SECS` overrides) `run wait` settles and a
-registered `--notify` hook fires with `TASKFLEET_STATUS=awaiting-input`. The
-worker may proceed only on a safe default already authorized by the brief or
-repository policy, never merely because time elapsed, closing the signal with the generation it opened:
-
-```bash
-printf '{"event_seq":%s}\n' "$request_seq" > /tmp/input-resolved-${run_id}.json
-taskfleet event create "$run_id" --kind node.input_resolved --node-id n-0001 \
-  --from-file /tmp/input-resolved-${run_id}.json
-```
-
-A fork resolved by other evidence is closed the same way before continuing.
-`node.input_resolved` only clears the matching attention generation; it neither
-delivers an answer nor grants approval. A Pi worker may continue on an actually
-received, authorized decision, not on an attention clear or adapter receipt alone.
+acknowledged message adapter, and to named residents between rounds; it is not
+how questions are answered, and an accepted message is not proof it was read or
+acted on. `node.awaiting_input` remains the signal for a prompt that waits at
+the worker itself (such as a Claude permission prompt): `run wait` reports it
+after a three-minute grace, and `node.input_resolved` only clears it. Neither
+carries an answer back.
 
 ### Tool and sub-workflow failure disclosure
 
@@ -544,10 +554,12 @@ the backoff, the terminal set (`done | failed | cancelled`), and the rule to
 branch on `manifest.status` rather than `lifecycle` (which is a fixed category
 and never matches a terminal value) all live inside it. It exits `0` when the
 run settles, `2` on `--timeout`, and `3` under `--fail-on-error` when the settled
-run failed, was cancelled, stalled, or needs attention. If it has already
-returned for awaiting input and you need the eventual terminal result, call it
-again with `--terminal` instead of sleeping and retrying the default wait.
-Resolve the open decision separately; `--terminal` does not answer it.
+run failed, was cancelled, stalled, or needs attention. If it returned
+with `asked: true`, answer `open_ask` with `run answer` (or `run escalate` it)
+and wait again. If it has already returned for awaiting input and you need the
+eventual terminal result, call it again with `--terminal` instead of sleeping
+and retrying the default wait. Resolve the open decision separately;
+`--terminal` does not answer it.
 Several ids block until all settle, `--any` until the first. Its envelope is multi-run, so read `data.runs[]` (for example
 `jq '.data.runs[] | {run_id, status, summary}'`), not `data.status`.
 

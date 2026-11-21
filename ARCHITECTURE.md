@@ -15,7 +15,8 @@ the only command and hidden subprocesses re-execute that exact current binary.
   protocol vocabulary.
 - `docs/decisions/` records architectural decisions. ADR 0002 establishes
   Taskfleet as the repository's sole identity; ADR 0003 adds named resident
-  workers that work in told rounds.
+  workers that work in told rounds; ADR 0004 lets a worker ask its parent a
+  blocking question.
 
 ## State and process boundaries
 
@@ -60,6 +61,14 @@ worktree after rebasing onto the source (`run/resume.rs`), `run land` is a
 recorded non-terminal merge (`run/land.rs`), and the supervisor's
 `supervise/resident.rs` notifies on round reports and applies idle expiry
 without ever merging.
+
+A worker's blocking question to its parent (ADR 0004) is four told node
+events: `node ask` (`node/ask.rs`) appends `node.asked` and polls the node
+projection; the parent's `run answer` / `run escalate` (`run/ask.rs`) close or
+escalate it by id; whichever command first finds it past its deadline under the
+exclusive lock appends `node.ask_timed_out`. The reducer folds the first closing
+event and cancels an open question wherever the node or attempt ends. A default
+`run wait` settles on an open, non-escalated question.
 
 Creator run and optional native-session attribution are immutable display facts,
 not ownership or fan-out edges. See [Creator attribution](docs/CREATOR-ATTRIBUTION.md)
