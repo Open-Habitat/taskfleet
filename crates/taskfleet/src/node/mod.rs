@@ -6,6 +6,7 @@
 //! — it's the agent's structured-report sink and accepts the §7.3
 //! payload schema directly rather than going through `event create`.
 
+pub mod ask;
 pub mod dto;
 pub mod list;
 pub mod report;
@@ -14,6 +15,7 @@ pub mod show;
 pub mod telemetry;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Subcommand;
 
@@ -22,6 +24,53 @@ use crate::output::OutputSpec;
 
 #[derive(Subcommand, Debug)]
 pub enum NodeAction {
+    /// Ask the parent agent a blocking question and wait for its answer
+    /// (ADR 0004). Works from any harness that can run a shell command.
+    ///
+    /// The first call records the question and fixes its deadline
+    /// (`--timeout`); `--wait` bounds this one invocation. Re-run with the same
+    /// `--idempotency-key` to re-attach; the deadline never moves. Exit 0
+    /// `answered` (act on `data.take`), 4 `pending` (re-run with the same key),
+    /// 2 `timed_out` (continue on your default, repeated in `data.take`, and
+    /// name that in your final report), 3 `cancelled` (stop; do not merge),
+    /// 1 usage error or a second question while one is open.
+    /// Example: taskfleet node ask --current --question "Drop the v1 API?"
+    ///   --option keep --option drop --default keep --idempotency-key api-v1 --json
+    Ask {
+        /// Exact run id (or pass --current).
+        #[arg(required_unless_present = "current", requires = "node_id")]
+        run_id: Option<String>,
+        /// Node id, e.g. n-0001 (or pass --current).
+        node_id: Option<String>,
+        /// Resolve the run from the current worktree, as `run show --current`
+        /// does; the node defaults to n-0001.
+        #[arg(long, conflicts_with = "run_id")]
+        current: bool,
+        /// The question (at most 8 KiB).
+        #[arg(long, required_unless_present = "question_file", conflicts_with = "question_file")]
+        question: Option<String>,
+        /// UTF-8 file holding the question.
+        #[arg(long)]
+        question_file: Option<PathBuf>,
+        /// What you will do if nobody answers. Must be something your brief
+        /// already allows, which may be "stop and report the decision".
+        #[arg(long)]
+        default: String,
+        /// A named choice the parent may pick with `run answer --choice`.
+        /// Repeat for several (at most 16).
+        #[arg(long = "option")]
+        options: Vec<String>,
+        /// Deadline, set once when the question is first asked (e.g. 30m, 2h).
+        #[arg(long, value_parser = crate::run::wait::parse_duration, default_value = "30m")]
+        timeout: Duration,
+        /// How long this invocation blocks before returning `pending` (exit 4).
+        /// Keep it under your harness's command time limit.
+        #[arg(long, value_parser = crate::run::wait::parse_duration, default_value = "8m")]
+        wait: Duration,
+        /// Stable key for this question; re-asking with it re-attaches.
+        #[arg(long)]
+        idempotency_key: String,
+    },
     /// List nodes belonging to a run.
     List {
         run_id: String,
@@ -114,6 +163,31 @@ pub fn dispatch(
     warnings: &[String],
 ) -> Result<(), CliError> {
     match action {
+        NodeAction::Ask {
+            run_id,
+            node_id,
+            current,
+            question,
+            question_file,
+            default,
+            options,
+            timeout,
+            wait,
+            idempotency_key,
+        } => ask::run(ask::Args {
+            current,
+            run_id,
+            node_id,
+            question,
+            question_file,
+            default,
+            options,
+            timeout,
+            wait,
+            idempotency_key,
+            spec,
+            warnings,
+        }),
         NodeAction::List { run_id, status } => list::run(list::Args {
             run_id,
             status,

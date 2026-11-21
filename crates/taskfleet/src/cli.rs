@@ -447,6 +447,8 @@ fn command_writes_state(command: &Command) -> bool {
             | crate::run::RunAction::SettlementIntent { .. }
             | crate::run::RunAction::Cancel { .. }
             | crate::run::RunAction::Message { .. }
+            | crate::run::RunAction::Answer { .. }
+            | crate::run::RunAction::Escalate { .. }
             | crate::run::RunAction::Reattach { .. }
             | crate::run::RunAction::UpgradeLock { .. } => true,
             crate::run::RunAction::Session {
@@ -462,7 +464,7 @@ fn command_writes_state(command: &Command) -> bool {
             crate::event::EventAction::Tail { .. } => false,
         },
         Command::Node { action } => match action {
-            crate::node::NodeAction::Telemetry { .. } => true,
+            crate::node::NodeAction::Telemetry { .. } | crate::node::NodeAction::Ask { .. } => true,
             crate::node::NodeAction::Report { dry_run, .. }
             | crate::node::NodeAction::RoundReport { dry_run, .. } => !dry_run,
             crate::node::NodeAction::List { .. } | crate::node::NodeAction::Show { .. } => false,

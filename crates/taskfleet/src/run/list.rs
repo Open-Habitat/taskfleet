@@ -242,6 +242,10 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 .and_then(|n| n.awaiting_input.as_ref())
                 .map(|open| crate::run::awaiting_input::AwaitingInputView::build(open, now));
             let resident = crate::run::resident::view(&m, default_node.as_ref());
+            let ask_views = default_node
+                .as_ref()
+                .map(|n| crate::run::ask::views(m.run_id.as_str(), n, now))
+                .unwrap_or_default();
             let worktree_path = default_node.as_ref().and_then(|n| n.worktree_path.clone());
             Ok(Some((
                 m,
@@ -252,6 +256,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 worktree_path,
                 transcripts,
                 resident,
+                ask_views,
             )))
         })
         .map_err(from_core)?;
@@ -264,6 +269,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             worktree_path,
             transcripts,
             resident,
+            ask_views,
         ) = match scanned {
             Some(v) => v,
             None => continue, // half-initialized run dir; skip silently
@@ -284,6 +290,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             .with_stillborn(stillborn)
             .with_attention(attention)
             .with_awaiting_input(awaiting_input)
+            .with_ask(ask_views)
             .with_resident(resident);
         // Filter the exact DTO values while still avoiding telemetry I/O for
         // excluded rows.
@@ -454,6 +461,8 @@ fn emit(runs: Vec<RunSummary>, spec: &OutputSpec, warnings: &[String]) -> Result
                     format!("{} (stillborn)", r.status)
                 } else if r.stalled {
                     format!("{} (stalled)", r.status)
+                } else if r.open_ask.as_ref().is_some_and(|a| a.settles_wait()) {
+                    format!("{} (asked)", r.status)
                 } else if r.awaiting_input {
                     format!("{} (awaiting-input)", r.status)
                 } else if r.attention_required {

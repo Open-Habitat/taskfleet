@@ -50,6 +50,14 @@ use std::path::{Path, PathBuf};
 use jiff::Timestamp;
 use serde_json::Value;
 
+mod ask;
+pub use ask::{
+    valid_ask_key, valid_ask_option, valid_ask_text, MAX_ASK_ANSWER_BYTES, MAX_ASK_DEFAULT_BYTES,
+    MAX_ASK_KEY_CHARS, MAX_ASK_NOTE_BYTES, MAX_ASK_OPTIONS, MAX_ASK_OPTION_CHARS,
+    MAX_ASK_QUESTION_BYTES, MAX_ASK_TIMEOUT_SECS,
+};
+use ask::cancel_open_ask;
+
 use crate::error::{Error, Result};
 use crate::paths::RunPaths;
 use crate::projections::{read_manifest_opt, read_node_opt, write_manifest, write_node};
@@ -315,6 +323,10 @@ pub(crate) fn reduce_event_to_ops(paths: &RunPaths, ev: &Event) -> Result<Vec<Pr
         "node.awaiting_input" => reduce_node_awaiting_input(paths, ev),
         "node.input_resolved" => reduce_node_input_resolved(paths, ev),
         "node.round_reported" => reduce_node_round_reported(paths, ev),
+        "node.asked" => ask::reduce_node_asked(paths, ev),
+        "node.ask_escalated" => ask::reduce_node_ask_escalated(paths, ev),
+        "node.answered" => ask::reduce_node_answered(paths, ev),
+        "node.ask_timed_out" => ask::reduce_node_ask_timed_out(paths, ev),
         "node.resumed" => reduce_node_resumed(paths, ev),
         "node.round_landed" => reduce_node_round_landed(paths, ev),
         "node.resident_dormant" => reduce_node_resident_dormant(paths, ev),
@@ -913,6 +925,8 @@ fn reduce_node_created(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>
         pending_merge: None,
         first_death_at: None,
         awaiting_input: None,
+        open_ask: None,
+        last_ask: None,
         claude_session_id: claude_session_from_data(&events_path, ev, d)?,
         resident: None,
     };
@@ -1219,6 +1233,7 @@ fn reduce_node_retry(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>> 
     // A retry is a new worker attempt. Never carry an unresolved question from
     // the dead attempt onto the replacement worker.
     n.awaiting_input = None;
+    cancel_open_ask(&mut n, ev);
     // The event carries its ABSOLUTE attempt number (the supervisor set it to
     // `retry_attempts + 1` at emit time). Assign it directly rather than a blind
     // `+= 1`: this makes the projection a pure function of the event, so a
@@ -1259,6 +1274,7 @@ fn reduce_node_status(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>>
     if new_status.is_terminal() {
         n.pending_merge = None;
         n.awaiting_input = None;
+        cancel_open_ask(&mut n, ev);
     }
     n.updated_at = ev.ts;
     Ok(vec![ProjectionOp::Node(n)])
@@ -1334,6 +1350,7 @@ fn reduce_node_report(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>>
             // (issue `merge-transaction-recovery`).
             n.pending_merge = None;
             n.awaiting_input = None;
+            cancel_open_ask(&mut n, ev);
             n.updated_at = ev.ts;
             return Ok(vec![ProjectionOp::Node(n)]);
         }
@@ -1358,6 +1375,7 @@ fn reduce_node_report(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>>
     // report still preserves the discussion in `last_report`, while avoiding a
     // stale non-terminal awaiting-input flag on the settled node.
     n.awaiting_input = None;
+    cancel_open_ask(&mut n, ev);
     // Any terminal outcome resolves an in-flight merge transaction: a successful
     // `explicit-merge` report completes it here (the normal, no-crash path), and
     // any other terminal report ends the node's lifecycle so no merge recovery
@@ -1431,6 +1449,7 @@ fn reduce_worker_exited(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp
     // open request so clean-exit attention and crash/stall handling remain the
     // actionable read-surface verdicts.
     n.awaiting_input = None;
+    cancel_open_ask(&mut n, ev);
     n.updated_at = ev.ts;
     Ok(vec![ProjectionOp::Node(n)])
 }
@@ -2212,6 +2231,7 @@ fn reduce_node_round_reported(paths: &RunPaths, ev: &Event) -> Result<Vec<Projec
     }
     // The round report answers any open question of this attempt.
     n.awaiting_input = None;
+    cancel_open_ask(&mut n, ev);
     n.updated_at = ev.ts;
     Ok(vec![ProjectionOp::Node(n)])
 }
@@ -2264,6 +2284,7 @@ fn reduce_node_resumed(paths: &RunPaths, ev: &Event) -> Result<Vec<ProjectionOp>
     n.worker_exit = None;
     n.first_death_at = None;
     n.awaiting_input = None;
+    cancel_open_ask(&mut n, ev);
     n.pending_merge = None;
     n.retained_display = None;
     n.retention_unavailable = None;

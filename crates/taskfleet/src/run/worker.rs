@@ -128,6 +128,8 @@ mod tests {
             pending_merge: None,
             first_death_at: None,
             awaiting_input: None,
+            open_ask: None,
+            last_ask: None,
             claude_session_id: None,
             resident: None,
         }

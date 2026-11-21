@@ -41,19 +41,34 @@ missing, duplicate, stale, or malformed evidence.
 
 ## Decisions and live replies
 
-Live `run message` replies are Pi-only: they require a Taskfleet-launched worker
-and the acknowledged message adapter. Claude, caller-owned workers, and older
-Pi runs without that adapter cannot receive them; headless placement adds no
-reply channel. Acceptance does not prove a message was read or acted on.
-`node.input_resolved` only clears a matching attention generation, not delivery
-or approval. Continue only on an actually received, authorized decision or a
-safe default already authorized by the brief or repository policy.
+When you meet a decision your brief does not settle, ask your parent with a
+plain shell command and wait for the answer. It works in every harness:
 
-For unattended work, if a new decision exceeds that authority, preserve work:
-do not wait for an impossible reply or merge on a guess. Write a terminal report with `success: false`
+```bash
+taskfleet node ask {RUN_ID} n-0001 --json \
+  --question "<the decision, with the context your parent needs>" \
+  --option "<choice>" --option "<choice>" \
+  --default "<what you will do if nobody answers; something the brief allows>" \
+  --timeout 30m --wait 8m --idempotency-key "<stable-key-for-this-question>"
+```
+
+Exit 0 `answered`: act on `data.take`. Exit 4 `pending`: run the same command
+again with the same key (the deadline does not move). Exit 2 `timed_out`:
+continue on your default, repeated in `data.take`. Exit 3 `cancelled`: stop,
+preserve work, do not merge. One question at a time; `--option` is optional
+and "stop and report the decision" is a valid default. Name in your final
+report every decision you took by default and every one your parent decided.
+
+If a decision has no acceptable default, preserve work instead of merging on a
+guess: write a terminal report with `success: false`
 and the decision in `discussion_items` to `/tmp/node-report-{RUN_ID}.json`, then
 submit it with `taskfleet node report {RUN_ID} n-0001 --from-file /tmp/node-report-{RUN_ID}.json`.
 The caller can decide and respawn with the answer and preserved work.
+
+Live `run message` replies are Pi-only and are not how questions are answered;
+`node.input_resolved` only clears a matching attention generation, not delivery
+or approval. Continue only on an actually received, authorized decision or a
+safe default already authorized by the brief or repository policy.
 
 ## Issue filing from this run
 
@@ -321,6 +336,9 @@ mod tests {
             assert!(p.contains("not delivery\nor approval"));
             assert!(p.contains("safe default already authorized"));
             assert!(p.contains("terminal report with `success: false`"));
+            assert!(p.contains(&format!("taskfleet node ask {RUN_ID} n-0001 --json")));
+            assert!(p.contains("--idempotency-key"));
+            assert!(p.contains("Exit 2 `timed_out`"));
             assert!(p.contains(&format!(
                 "taskfleet node report {RUN_ID} n-0001 --from-file /tmp/node-report-{RUN_ID}.json"
             )));

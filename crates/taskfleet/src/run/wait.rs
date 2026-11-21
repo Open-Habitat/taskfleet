@@ -44,6 +44,16 @@
 //! `--fail-on-error`, grades as a failure (exit `3`). The remediation both point
 //! at is `run reattach`, which revives the supervisor.
 //!
+//! ## Questions from the worker (ADR 0004)
+//!
+//! An open `node ask` question on the default node that is neither escalated
+//! nor past its deadline settles a default wait at once, with no grace: the
+//! worker is blocked and the reader is its parent agent. The outcome carries
+//! `asked: true` and `open_ask` (with a copyable `run answer` hint); it is not
+//! an error and never grades as one. An escalated, answered, timed-out, or
+//! expired question does not return the wait, and `--terminal` ignores
+//! questions as it ignores other attention.
+//!
 //! ## Exit codes
 //!
 //! By default, a run counts as *settled* when it reaches a terminal status OR when it is
@@ -256,6 +266,17 @@ struct RunOutcome {
     /// Resident round view (name, `round_state`, latest report summary).
     #[serde(skip_serializing_if = "Option::is_none")]
     resident: Option<crate::run::resident::ResidentView>,
+    /// The worker's open question (ADR 0004) satisfied the wait: answer it with
+    /// `run answer` or pass it on with `run escalate`. Not an error; never
+    /// grades as a failure under `--fail-on-error`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    asked: bool,
+    /// The default node's open question, whether or not it woke the wait.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    open_ask: Option<crate::run::ask::OpenAskView>,
+    /// How the default node's most recent question ended.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_ask: Option<crate::run::ask::LastAskView>,
 }
 
 #[derive(Serialize)]
@@ -450,6 +471,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             // attention signal the reason this terminal-only wait settled.
             latched.awaiting_input = None;
             latched.caller = None;
+            latched.ask = None;
         }
         let mut outcome = read_outcome(run_id, paths, latched)?;
         if args.check_in.is_some() {
@@ -514,6 +536,7 @@ type ProgressKey = (
     Option<u64>,
     Option<u64>,
     Option<(u64, bool)>,
+    Option<u64>,
 );
 
 fn wait_loop(
@@ -558,6 +581,7 @@ fn wait_loop(
                 caller: settle.caller.clone(),
                 round: settle.round,
                 round_interrupted: settle.round_interrupted,
+                ask: settle.ask,
             };
             // A run is settled when it reaches a terminal status, OR when it is
             // stalled (a supervisor that died — before creating any node, or
@@ -572,6 +596,7 @@ fn wait_loop(
                     && (settle.stall.is_some()
                         || settle.attention
                         || settle.round.is_some()
+                        || settle.ask.is_some()
                         || settle.awaiting_input.is_some()
                         || settle
                             .caller
@@ -590,6 +615,7 @@ fn wait_loop(
                     .caller
                     .as_ref()
                     .map(|c| (c.generation, c.state.needs_attention())),
+                settle.ask,
             );
             if progress && prev[i] != Some(key) {
                 emit_progress(
@@ -602,6 +628,7 @@ fn wait_loop(
                         .caller
                         .as_ref()
                         .map(|c| (c.generation, c.state.needs_attention())),
+                    settle.ask,
                 );
             }
             prev[i] = Some(key);
@@ -695,6 +722,10 @@ struct Settle {
     round: Option<u64>,
     /// Whether that open round was ended by `run interrupt`.
     round_interrupted: bool,
+    /// Id of an open question that is neither escalated nor past its
+    /// deadline (ADR 0004). Settles the wait immediately, with no grace: the
+    /// worker is blocked and the reader is its parent.
+    ask: Option<u64>,
 }
 
 /// The two non-terminal settle verdicts a poll can latch for a run — the stall
@@ -711,6 +742,7 @@ struct LatchedSettle {
     caller: Option<CallerPiLifecycle>,
     round: Option<u64>,
     round_interrupted: bool,
+    ask: Option<u64>,
 }
 
 /// Read a run's [`Settle`] snapshot under the shared lock. `None` when the run
@@ -757,6 +789,12 @@ fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settl
             .and_then(taskfleet_core::ResidentState::open_round);
         let round = open_round.map(|r| r.event_seq);
         let round_interrupted = open_round.is_some_and(|r| r.interrupted);
+        let ask = node
+            .as_ref()
+            .filter(|n| !n.status.is_terminal())
+            .and_then(|n| n.open_ask.as_deref())
+            .filter(|o| o.escalated_at.is_none() && now < o.expires_at)
+            .map(|o| o.ask_id);
         // Resolve attention-over-stall precedence HERE (design.md §2.5), at snapshot
         // construction — not only in `read_outcome` — so the `--progress` JSONL and
         // the settled-count decision agree with the final outcome. A clean-exited
@@ -787,6 +825,7 @@ fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settl
             caller,
             round,
             round_interrupted,
+            ask,
         }))
     })
     .map_err(from_core)
@@ -827,8 +866,13 @@ fn read_outcome(
         let resident = manifest
             .as_ref()
             .and_then(|m| crate::run::resident::view(m, node.as_ref()));
+        let ask_views = node
+            .as_ref()
+            .map(|n| crate::run::ask::views(paths.run_id.as_str(), n, chrono::Utc::now()))
+            .unwrap_or_default();
         Ok(GitInputs {
             resident,
+            ask_views,
             retained_manifest: manifest.clone(),
             retained_nodes,
             status: manifest.as_ref().map(|m| m.status),
@@ -1053,6 +1097,13 @@ fn read_outcome(
             && latched.round.is_some()
             && latched.round_interrupted,
         resident: git_inputs.resident,
+        asked: !status.is_terminal() && latched.ask.is_some(),
+        open_ask: if status.is_terminal() {
+            None
+        } else {
+            git_inputs.ask_views.0
+        },
+        last_ask: git_inputs.ask_views.1,
     })
 }
 
@@ -1073,6 +1124,10 @@ fn stall_reason(kind: StallKind) -> &'static str {
 /// snapshot (invariant 3) explicit and lets the git shell-out run lock-free.
 struct GitInputs {
     resident: Option<crate::run::resident::ResidentView>,
+    ask_views: (
+        Option<crate::run::ask::OpenAskView>,
+        Option<crate::run::ask::LastAskView>,
+    ),
     retained_manifest: Option<taskfleet_core::Manifest>,
     retained_nodes: Vec<taskfleet_core::Node>,
     status: Option<Status>,
@@ -1129,6 +1184,7 @@ fn emit_progress(
     attention_required: bool,
     awaiting_input: bool,
     caller: Option<(u64, bool)>,
+    ask: Option<u64>,
 ) {
     let mut event = serde_json::json!({
         "run_id": run_id,
@@ -1137,6 +1193,9 @@ fn emit_progress(
         "attention_required": attention_required,
         "awaiting_input": awaiting_input,
     });
+    if let Some(ask_id) = ask {
+        event["ask_id"] = serde_json::json!(ask_id);
+    }
     if let Some((generation, needs_attention)) = caller {
         event["caller_agent"] =
             serde_json::json!({"generation": generation, "needs_attention": needs_attention});
@@ -1223,6 +1282,12 @@ fn emit(data: &WaitData, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                     );
                 } else if r.round_reported {
                     print!("  round_reported=true");
+                }
+                if let Some(a) = &r.open_ask {
+                    print!(
+                        "  open_ask={} state={} (answer: {})",
+                        a.ask_id, a.state, a.answer_hint
+                    );
                 }
                 if r.awaiting_input {
                     let count = r

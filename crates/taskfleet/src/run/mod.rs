@@ -5,6 +5,7 @@
 //! single `dispatch` entry point called from `cli.rs`.
 
 mod admission;
+pub mod ask;
 pub mod attach;
 pub mod attention;
 pub mod awaiting_input;
@@ -360,6 +361,52 @@ pub enum RunAction {
     /// waits for its told exit. The next `run message` resumes the same
     /// session. A worker that already reported its round or exited is left
     /// alone. Example: taskfleet run interrupt proto-login --json
+    /// Answer a worker's open question (`node ask`, ADR 0004) and release it.
+    /// Exactly one of --text, --body-file, --choice. A question that is no
+    /// longer open is refused (`ask_closed`) with how it ended and the default
+    /// the worker took; an identical repeat of the recorded answer is a replay.
+    /// Example: taskfleet run answer <run-id> --ask 42 --choice drop --json
+    Answer {
+        /// Run id, unambiguous prefix, or resident name (this repository).
+        run_id: String,
+        /// The question id (`open_ask.ask_id` in `run wait` / `run show`).
+        #[arg(long = "ask")]
+        ask_id: u64,
+        #[arg(long, default_value = "n-0001")]
+        node: String,
+        /// Free-text answer (at most 16 KiB).
+        #[arg(long, required_unless_present_any = ["body_file", "choice"], conflicts_with_all = ["body_file", "choice"])]
+        text: Option<String>,
+        /// UTF-8 file holding the answer.
+        #[arg(long, conflicts_with = "choice")]
+        body_file: Option<std::path::PathBuf>,
+        /// One of the question's options.
+        #[arg(long)]
+        choice: Option<String>,
+        /// Your own statement of who made the decision: `agent` (you judged)
+        /// or `person` (the person you work with decided). Unverified; it
+        /// grants the worker nothing its brief did not.
+        #[arg(long, value_enum, default_value = "agent")]
+        decided_by: DecidedByArg,
+    },
+    /// Say you passed a worker's open question on to a person: the question
+    /// stays open, stops returning `run wait`, and with --extend its deadline
+    /// moves later (never earlier). Answer it later with `run answer`.
+    /// Example: taskfleet run escalate <run-id> --ask 42 --extend 4h --json
+    Escalate {
+        /// Run id, unambiguous prefix, or resident name (this repository).
+        run_id: String,
+        #[arg(long = "ask")]
+        ask_id: u64,
+        #[arg(long, default_value = "n-0001")]
+        node: String,
+        /// Move the deadline to at least now + this (e.g. 4h; at most 7d).
+        #[arg(long, value_parser = wait::parse_duration)]
+        extend: Option<Duration>,
+        /// Short note recorded with the escalation.
+        #[arg(long)]
+        note: Option<String>,
+    },
     Interrupt {
         /// Run id, unambiguous prefix, or resident name (this repository).
         run: String,
@@ -528,7 +575,9 @@ pub enum RunAction {
         #[arg(long, value_parser = wait::parse_check_in)]
         check_in: Option<Duration>,
         /// Wait only for terminal status, ignoring non-terminal attention signals
-        /// (including awaiting input). Default wait still wakes once for attention.
+        /// (including awaiting input and worker questions). Default wait still
+        /// wakes for attention, and at once for an open `node ask` question
+        /// (`asked: true`, `open_ask`): answer it with `run answer`.
         #[arg(long)]
         terminal: bool,
         /// Exit `3` if the condition is met but a settled run was
@@ -555,6 +604,13 @@ pub enum RunAction {
         #[arg(long, hide = true)]
         max_iter: Option<u32>,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum DecidedByArg {
+    Agent,
+    Person,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -871,6 +927,54 @@ pub fn dispatch(action: RunAction, spec: &OutputSpec, warnings: &[String]) -> Re
             node,
             wait_exit,
             dry_run,
+            spec,
+            warnings,
+        }),
+        RunAction::Answer {
+            run_id,
+            ask_id,
+            node,
+            text,
+            body_file,
+            choice,
+            decided_by,
+        } => {
+            let reply = match (text, body_file, choice) {
+                (Some(t), None, None) => ask::Reply::Text(t),
+                (None, Some(path), None) => ask::Reply::Text(read_answer_file(&path)?),
+                (None, None, Some(c)) => ask::Reply::Choice(c),
+                _ => {
+                    return Err(CliError::user(
+                        "invalid_answer",
+                        "pass exactly one of --text, --body-file, --choice",
+                    ))
+                }
+            };
+            ask::answer(ask::AnswerArgs {
+                run_id: resident::canonical_run_arg(run_id)?,
+                node_id: node,
+                ask_id,
+                reply,
+                decided_by: match decided_by {
+                    DecidedByArg::Agent => "agent",
+                    DecidedByArg::Person => "person",
+                },
+                spec,
+                warnings,
+            })
+        }
+        RunAction::Escalate {
+            run_id,
+            ask_id,
+            node,
+            extend,
+            note,
+        } => ask::escalate(ask::EscalateArgs {
+            run_id: resident::canonical_run_arg(run_id)?,
+            node_id: node,
+            ask_id,
+            extend,
+            note,
             spec,
             warnings,
         }),
@@ -1260,6 +1364,26 @@ pub fn parse_run_id(value: &str) -> Result<RunId, CliError> {
 
 /// Validate a `node_id` clap argument into a typed [`NodeId`] before it can
 /// reach any path helper.
+/// Read a `run answer --body-file`, bounded to the answer limit plus one byte.
+fn read_answer_file(path: &Path) -> Result<String, CliError> {
+    use std::io::Read as _;
+    let max = taskfleet_core::reducer::MAX_ASK_ANSWER_BYTES;
+    let f = std::fs::File::open(path).map_err(|e| {
+        CliError::user("invalid_body_file", format!("open {}: {e}", path.display()))
+            .with_invalid_value(path.display().to_string())
+    })?;
+    let mut bytes = Vec::new();
+    f.take(max as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| CliError::user("invalid_body_file", format!("read {}: {e}", path.display())))?;
+    String::from_utf8(bytes).map_err(|e| {
+        CliError::user(
+            "invalid_body_file",
+            format!("{} is not UTF-8: {e}", path.display()),
+        )
+    })
+}
+
 pub fn parse_node_id(value: &str) -> Result<NodeId, CliError> {
     NodeId::parse_str(value).map_err(|e| invalid_id(value, &e))
 }

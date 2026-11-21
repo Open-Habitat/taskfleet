@@ -219,6 +219,10 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
             .as_ref()
             .and_then(|n| n.awaiting_input.as_ref())
             .map(|open| crate::run::awaiting_input::AwaitingInputView::build(open, now));
+        let ask_views = node
+            .as_ref()
+            .map(|n| crate::run::ask::views(manifest.run_id.as_str(), n, now))
+            .unwrap_or_default();
         let landing = LandingFields {
             source_repo: manifest.source_repo.clone(),
             source_branch: manifest.source_branch.clone(),
@@ -240,6 +244,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
             stalled_idle_min,
             attention,
             awaiting_input,
+            ask_views,
             landing,
             nodes,
             transcripts,
@@ -256,6 +261,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         stalled_idle_min,
         attention,
         awaiting_input,
+        ask_views,
         landing,
         nodes,
         transcripts,
@@ -332,6 +338,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         ))
         .with_attention(attention)
         .with_awaiting_input(awaiting_input)
+        .with_ask(ask_views)
         .with_resident(crate::run::resident::view(
             &manifest,
             nodes.iter().find(|n| n.node_id.as_str() == "n-0001"),
@@ -451,6 +458,19 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                         payload.manifest.run_id
                     ),
                 }
+            }
+            if let Some(ask) = &payload.summary.open_ask {
+                println!(
+                    "open-ask: {} ({}) — {:?}; default {:?}; expires {}",
+                    ask.ask_id, ask.state, ask.question, ask.default, ask.expires_at
+                );
+                if !ask.options.is_empty() {
+                    println!("  options: {}", ask.options.join(" | "));
+                }
+                println!("  answer: {}", ask.answer_hint);
+            }
+            if let Some(last) = &payload.summary.last_ask {
+                println!("last-ask: {} {}", last.ask_id, last.outcome);
             }
             if let Some(awaiting) = &payload.summary.awaiting_input_detail {
                 println!(

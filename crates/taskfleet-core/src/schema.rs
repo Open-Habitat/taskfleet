@@ -1297,6 +1297,17 @@ pub struct Node {
     /// default without inventing a second advisory schema.
     #[serde(default)]
     pub awaiting_input: Option<Box<AwaitingInput>>,
+    /// The worker's open blocking question to its parent (`node.asked`), if
+    /// any. At most one per node. Closed by the first of `node.answered`,
+    /// `node.ask_timed_out`, or the node ending (terminal status or report,
+    /// retry, told worker exit, round report), which moves it to
+    /// [`Self::last_ask`]. Deliberately separate from [`Self::awaiting_input`]:
+    /// that field means a prompt answered at the worker itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_ask: Option<Box<OpenAsk>>,
+    /// How the most recent question ended. Absent before the first one closes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_ask: Option<Box<ClosedAsk>>,
     /// Claude session id the launcher assigned (`--session-id`), recorded so a
     /// resident round can `--resume` exactly that session. Absent for Pi and
     /// for runs created before the field existed.
@@ -1306,6 +1317,89 @@ pub struct Node {
     /// and before the first round report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resident: Option<Box<ResidentState>>,
+}
+
+/// A worker's open blocking question to its parent, projected from
+/// `node.asked`. The id is the `seq` of that event, so an answer addressed to an
+/// older question can never close a newer one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenAsk {
+    /// `seq` of the `node.asked` event.
+    pub ask_id: u64,
+    /// Worker attempt that asked.
+    pub attempt: u32,
+    /// The question, as the worker wrote it.
+    pub question: String,
+    /// Optional named choices; an answer may pick one with `--choice`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    /// What the worker does when nobody answers before `expires_at`.
+    pub default: String,
+    /// The worker's idempotency key; re-asking with it re-attaches.
+    pub idempotency_key: String,
+    /// Envelope timestamp of `node.asked`.
+    pub asked_at: DateTime<Utc>,
+    /// Deadline, fixed from `asked_at` + the requested timeout and moved only
+    /// later, by `node.ask_escalated`.
+    pub expires_at: DateTime<Utc>,
+    /// Set when the parent passed the question on to a person
+    /// (`node.ask_escalated`). An escalated question no longer settles the
+    /// parent's `run wait`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalated_at: Option<DateTime<Utc>>,
+    /// The parent's latest escalation note, if it gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalation_note: Option<String>,
+}
+
+/// How a question ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AskOutcome {
+    /// The parent answered before the deadline.
+    Answered,
+    /// The deadline passed; the worker took its default.
+    TimedOut,
+    /// The node or its worker attempt ended while the question was open.
+    Cancelled,
+}
+
+impl AskOutcome {
+    /// Stable wire name.
+    #[must_use]
+    pub const fn wire(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// A closed question with its outcome (`Node::last_ask`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClosedAsk {
+    /// The question as it was open when it closed.
+    pub ask: OpenAsk,
+    /// How it ended.
+    pub outcome: AskOutcome,
+    /// Envelope timestamp of the closing event.
+    pub closed_at: DateTime<Utc>,
+    /// `seq` of the event that closed it.
+    pub closed_seq: u64,
+    /// Free-text answer (`answered` only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    /// Chosen option (`answered` only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>,
+    /// `agent` or `person`, as the answering session stated it (`answered`
+    /// only). Unverified; it grants nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<String>,
+    /// Why a `cancelled` question ended (the closing event kind).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_reason: Option<String>,
 }
 
 /// Durable open-discussion state projected from `node.awaiting_input`.

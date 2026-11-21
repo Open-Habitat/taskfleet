@@ -354,6 +354,15 @@ pub struct RunSummary {
     /// Full question/options/default context, omitted when no request is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub awaiting_input_detail: Option<crate::run::awaiting_input::AwaitingInputView>,
+    /// The worker's open blocking question to its parent (`node ask`, ADR
+    /// 0004) on the default node. Omitted when none is open or the run is
+    /// terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_ask: Option<crate::run::ask::OpenAskView>,
+    /// How the default node's most recent question ended. Omitted before the
+    /// first one closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_ask: Option<crate::run::ask::LastAskView>,
     /// Named resident round state (ADR 0003): name, `round_state`
     /// (`working | waiting | dormant`), the latest round report and landing.
     /// Omitted for ordinary runs.
@@ -430,6 +439,23 @@ impl RunSummary {
         self
     }
 
+    /// Attach the default node's question views (ADR 0004). A terminal run
+    /// keeps only `last_ask`.
+    #[must_use]
+    pub fn with_ask(
+        mut self,
+        (open, last): (
+            Option<crate::run::ask::OpenAskView>,
+            Option<crate::run::ask::LastAskView>,
+        ),
+    ) -> Self {
+        self.open_ask = (!matches!(self.status.as_str(), "done" | "failed" | "cancelled"))
+            .then_some(open)
+            .flatten();
+        self.last_ask = last;
+        self
+    }
+
     /// Attach the resident round view (ADR 0003); `None` for ordinary runs.
     #[must_use]
     pub fn with_resident(mut self, resident: Option<crate::run::resident::ResidentView>) -> Self {
@@ -496,6 +522,8 @@ impl From<&Manifest> for RunSummary {
             telemetry_available: false,
             telemetry_counts: crate::run::telemetry::TelemetryCounts::default(),
             awaiting_input_detail: None,
+            open_ask: None,
+            last_ask: None,
             resident: None,
         }
     }

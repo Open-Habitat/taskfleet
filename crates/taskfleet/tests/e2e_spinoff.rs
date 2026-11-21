@@ -872,3 +872,149 @@ fn claude_headless_unresolved_decision_reports_failure_and_preserves_work() {
         git(tools.repo_path(), &["rev-parse", "main"])
     );
 }
+
+/// ADR 0004 end to end, with a Claude-style worker that cannot receive
+/// `run message`: the worker asks from its worktree with plain shell
+/// commands (`node ask --current`), the parent's default `run wait` wakes on
+/// the question, `run message` is refused, the parent answers with
+/// `run answer`, and the worker continues on the answer, commits, and lands
+/// with `run merge`.
+#[test]
+fn claude_worker_asks_parent_answers_and_worker_lands_on_the_answer() {
+    let home = TestHome::new();
+    let scratch = TempDir::new().unwrap();
+    let tools = NativeSpawnTools::new();
+    let worktree = tools.worktree("claude-ask");
+    let bin = env!("CARGO_BIN_EXE_taskfleet");
+    let git_bin = common::fixture_git_binary();
+    let ask_out = scratch.path().join("ask-out.json");
+    let merge_out = scratch.path().join("merge-out.json");
+    let worker = scratch.path().join("claude-stub.sh");
+    executable(
+        &worker,
+        &format!(
+            r#"#!/bin/sh
+case "$*" in *'taskfleet node ask'*) ;; *) exit 53 ;; esac
+cd '{wt}' || exit 50
+export TASKFLEET_HOME='{home}' HOME='{home}'
+# A real agent starts in seconds; wait until creation has published the run.
+n=0
+until '{bin}' run show --current --output json >/dev/null 2>&1; do
+  n=$((n+1)); [ $n -lt 200 ] || exit 56; /bin/sleep 0.1
+done
+'{bin}' node ask --current --output json --question 'Drop the v1 API?' \
+  --option keep --option drop --default keep --timeout 2m --wait 60s \
+  --idempotency-key drop-v1 > '{ask_out}'
+[ $? -eq 0 ] || exit 51
+grep -q '"take": *"drop"' '{ask_out}' || exit 52
+id=$(sed -n 's/.*"run_id": *"\([^"]*\)".*/\1/p' '{ask_out}' | head -n 1)
+echo drop > DECISION
+'{git}' add -A || exit 54
+'{git}' -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm decided || exit 55
+exec '{bin}' run merge "$id" --source main --output json > '{merge_out}'
+"#,
+            wt = worktree.display(),
+            home = home.path().display(),
+            bin = bin,
+            ask_out = ask_out.display(),
+            merge_out = merge_out.display(),
+            git = git_bin.display(),
+        ),
+    );
+    git(tools.repo_path(), &["config", "user.name", "Fixture"]);
+    git(
+        tools.repo_path(),
+        &["config", "user.email", "fixture@example.invalid"],
+    );
+    std::fs::write(home.path().join("config.toml"), format!(
+        "[profiles.claude]\ndescription=\"ask fixture\"\ncapability=\"fast\"\nresidency=\"local\"\nagents=[{{harness=\"claude\",command=[\"{}\"]}}]\n[profile]\ndefault=\"claude\"\n", worker.display())).unwrap();
+    let command = || {
+        let mut cmd = Command::new(bin);
+        cmd.env("TASKFLEET_HOME", home.path())
+            .env("HOME", home.path());
+        cmd
+    };
+    let mut create = command();
+    tools.configure(&mut create, &worktree, "headless");
+    let created = run_ok(create.args([
+        "--output",
+        "json",
+        "run",
+        "create",
+        "--kind",
+        "spinoff",
+        "--headless",
+        "--title",
+        "claude asks",
+        "--task",
+        "Decide about the v1 API with your parent.",
+    ]));
+    let id = created["data"]["run_id"].as_str().unwrap().to_string();
+    let dir = home.path().join("runs").join(&id);
+    let events = dir.join("events.jsonl");
+
+    // The parent waits on its worker and wakes on the question.
+    let waited = command()
+        .args(["--output", "json", "run", "wait", &id, "--timeout", "60s"])
+        .output()
+        .unwrap();
+    assert!(
+        waited.status.success(),
+        "wait: {}; stub: {}",
+        String::from_utf8_lossy(&waited.stderr),
+        std::fs::read_to_string(tools.agent_stderr()).unwrap_or_default()
+    );
+    let waited: Value = serde_json::from_slice(&waited.stdout).unwrap();
+    let run = &waited["data"]["runs"][0];
+    assert_eq!(run["asked"], true, "{waited}");
+    assert!(matches!(run["status"].as_str(), Some("pending" | "running")));
+    let ask_id = run["open_ask"]["ask_id"].as_u64().unwrap().to_string();
+    assert_eq!(run["open_ask"]["options"], serde_json::json!(["keep", "drop"]));
+
+    // A Claude worker cannot receive a live message; the answer goes through
+    // the run's event log instead.
+    let rejected = command()
+        .args(["run", "message", &id, "drop it"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let error: Value = serde_json::from_slice(&rejected.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "message_unsupported");
+
+    run_ok(command().args([
+        "--output",
+        "json",
+        "run",
+        "answer",
+        &id,
+        "--ask",
+        &ask_id,
+        "--choice",
+        "drop",
+    ]));
+    wait_event(&events, "supervisor.exited");
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["status"], "done",
+        "stub: {}",
+        std::fs::read_to_string(tools.agent_stderr()).unwrap_or_default()
+    );
+    let asked: Value = serde_json::from_slice(&std::fs::read(&ask_out).unwrap()).unwrap();
+    assert_eq!(asked["data"]["outcome"], "answered");
+    assert_eq!(asked["data"]["decided_by"], "agent");
+    assert_eq!(
+        git(tools.repo_path(), &["show", "main:DECISION"]),
+        "drop"
+    );
+    let kinds: Vec<String> = std::fs::read_to_string(&events)
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|e| e["kind"].as_str().map(str::to_owned))
+        .collect();
+    let pos = |k: &str| kinds.iter().position(|x| x == k).unwrap_or_else(|| panic!("{k}: {kinds:?}"));
+    assert!(pos("node.asked") < pos("node.answered"));
+    assert!(pos("node.answered") < pos("merge.started"));
+    assert!(!kinds.iter().any(|k| k == "node.awaiting_input"));
+}
