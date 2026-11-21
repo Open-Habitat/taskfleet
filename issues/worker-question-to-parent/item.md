@@ -2,7 +2,7 @@
 created: 2026-11-21
 updated: 2026-11-21
 type: feature
-status: open
+status: done
 priority: normal
 provenance: other
 provenance_detail: Open Habitat proposal approved by Jari 2026-11-21
@@ -10,6 +10,8 @@ source_ref: taskfleet:01m7yhebct9x5jnnecf3d24mgv/brief:tf-ask-proposal
 originating_run: 01m7yhebct9x5jnnecf3d24mgv
 originating_run_kind: spinoff
 lane: worker-messaging
+closed: 2026-11-21
+closed_by: taskfleet:01m7yktrmyzj9sdfepdyr61qqm
 ---
 
 # Worker's blocking question to its parent (node ask / run answer)
@@ -54,3 +56,9 @@ surfaces.
 
 The open choices the proposal left are recorded in
 `docs/decisions/0004-worker-questions-to-parent.md`.
+
+## Resolution
+
+### 2026-11-21T08:47:48Z · @taskfleet:01m7yktrmyzj9sdfepdyr61qqm
+
+Landed via run 01m7yktrmyzj9sdfepdyr61qqm: node ask / run answer / run escalate adopted from the preserved branch of 01m7yhebct9x5jnnecf3d24mgv, ported to jiff, full local release gate green (1331 tests, review-regression tests included).

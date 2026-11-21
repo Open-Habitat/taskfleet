@@ -2,7 +2,7 @@
 created: 2026-11-21
 updated: 2026-11-21
 type: chore
-status: open
+status: done
 priority: high
 provenance: other
 provenance_detail: observed by taskfleet run gate
@@ -10,6 +10,8 @@ source_ref: taskfleet:01m7yhebct9x5jnnecf3d24mgv/gate:cargo-deny-advisories-2026
 originating_run: 01m7yhebct9x5jnnecf3d24mgv
 originating_run_kind: spinoff
 lane: unlaned
+closed: 2026-11-21
+closed_by: taskfleet:01m7yktrmyzj9sdfepdyr61qqm
 ---
 
 # cargo deny advisories (chrono, humantime unmaintained; xattr unsound) turn the release gate red
@@ -50,3 +52,9 @@ Also seen in the same run: stable clippy 1.100 (2026-11-09) added
 `event/tail.rs`, `run/list.rs`, `run/resume.rs`, `skill.rs`,
 `tests/supervise_gates.rs`); those are fixed on branch
 `wt/ecf3d24mgv-worker-asks-parent-node-ask-run-answ`.
+
+## Resolution
+
+### 2026-11-21T08:47:48Z · @taskfleet:01m7yktrmyzj9sdfepdyr61qqm
+
+rustix bumped to 1.1.6 (RUSTSEC-2026-0486); chrono replaced by jiff (RUSTSEC-2026-0543); humantime replaced by a local parser in crates/taskfleet/src/duration.rs (RUSTSEC-2026-0542). No deny.toml ignore added; cargo deny check passes.
