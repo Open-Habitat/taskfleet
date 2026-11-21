@@ -64,8 +64,10 @@ one.
   as `cancelled` with the closing event kind as its reason. A run-level
   terminal status seen before the node projection catches up also reads as
   `cancelled` to the waiting worker.
-- **Idempotency is node-scoped and by key.** The key is stored as the
-  `node.asked` envelope key `ask:<node>:<key>`. A re-ask with the same key and
+- **Idempotency is scoped to the node and worker attempt.** The key is
+  stored as the `node.asked` envelope key `ask:<node>:a<attempt>:<key>`, so a
+  retried worker or a resumed resident round that reuses a key asks afresh
+  rather than inheriting an earlier attempt's outcome. A re-ask with the same key and
   the same question re-attaches, even after that question closed (a killed
   command learns its answer); the same key with a different question is refused
   (`idempotency_conflict`). A second question while one is open is refused

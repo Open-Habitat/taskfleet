@@ -754,3 +754,39 @@ fn unprojected_closing_event_is_replayed_before_answering() {
 fn chrono_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
 }
+
+/// A retried worker attempt that reuses a key asks afresh; it does not attach
+/// to the previous attempt's question, which the retry cancelled.
+#[test]
+fn retried_attempt_reusing_a_key_asks_afresh() {
+    let home = TestHome::new();
+    let id = pending_run(home.path());
+    let first = run_exit(&mut ask(home.path(), &id, "same", &["--wait", "0s"]), 4);
+    // `event create` does not accept `node.retry`; append it raw and let the
+    // next locked command replay it, as it would a supervisor's retry.
+    raw_append(home.path(), &id, "node.retry", json!({"attempt": 1}));
+    let second = run_exit(&mut ask(home.path(), &id, "same", &["--wait", "0s"]), 4);
+    assert_eq!(second["data"]["attached"], false);
+    assert_ne!(second["data"]["ask_id"], first["data"]["ask_id"]);
+    assert_eq!(count(home.path(), &id, "node.asked"), 2);
+}
+
+/// Append one event line to the log without projecting it: the state a writer
+/// leaves when it dies between the fsynced append and the projection commit.
+fn raw_append(home: &Path, run_id: &str, kind: &str, data: Value) {
+    let log = home.join("runs").join(run_id).join("events.jsonl");
+    let mut text = std::fs::read_to_string(&log).unwrap();
+    let last: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+    let line = json!({
+        "ts": chrono_now(),
+        "seq": last["seq"].as_u64().unwrap() + 1,
+        "kind": kind,
+        "run_id": run_id,
+        "node_id": "n-0001",
+        "idempotency_key": null,
+        "data": data,
+    });
+    text.push_str(&line.to_string());
+    text.push('\n');
+    std::fs::write(&log, text).unwrap();
+}

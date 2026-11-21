@@ -17,7 +17,8 @@
 //!
 //! Exit 2 is also the generic system-error code; a real outcome always carries
 //! its success envelope on stdout, an error carries an error envelope on
-//! stderr. Re-invoking with the same key re-attaches to the same question
+//! stderr. Re-invoking with the same key from the same worker attempt
+//! re-attaches to the same question
 //! (found by its `node.asked` envelope key, so even a question answered while
 //! the command was killed reports its answer). A different question while one
 //! is open is refused and names the open one.
@@ -227,9 +228,12 @@ fn load(paths: &RunPaths, node_id: &NodeId) -> Result<(Manifest, Node), CliError
     Ok((manifest, node))
 }
 
-/// The envelope key: node-scoped, so two nodes may reuse a worker key.
-fn envelope_key(node_id: &NodeId, key: &str) -> String {
-    format!("ask:{node_id}:{key}")
+/// The envelope key, scoped to the node and the worker attempt: two nodes may
+/// reuse a key, and a retried or resumed worker reusing a key asks afresh
+/// instead of attaching to an earlier attempt's (cancelled or answered)
+/// question. Within one attempt a killed command re-attaches.
+fn envelope_key(node_id: &NodeId, attempt: u32, key: &str) -> String {
+    format!("ask:{node_id}:a{attempt}:{key}")
 }
 
 /// The question being waited on, fixed after the ask/attach step.
@@ -256,7 +260,7 @@ fn ask_or_attach(
     let guard = crate::run::ask::lock_run(paths)?;
     let witness = guard.witness();
     let (manifest, node) = load(paths, node_id)?;
-    let key = envelope_key(node_id, &args.idempotency_key);
+    let key = envelope_key(node_id, node.retry_attempts, &args.idempotency_key);
     if let Some(prior) =
         find_prior_with_key(&witness, paths, "node.asked", &key).map_err(from_core)?
     {
