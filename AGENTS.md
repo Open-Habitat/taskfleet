@@ -8,46 +8,147 @@ plus flock-guarded projections, so every UI reads the same source of truth. The
 orchestration workflows ship as bundled skills under
 `crates/taskfleet/skills/*/SKILL.template.md` (`/worktree-spinoff`,
 `/worktree-research`, `/worktree-technical-decision`, `/fan-out`,
-`/stint-start`, `/stint-handoff`, and others).
+`/stint-start`, `/stint-handoff`, and others). The repository is
+`Open-Habitat/taskfleet`; Open Habitat pins taskfleet as a runtime component
+and reads its run JSON, so a change to a read contract is felt outside this
+repository.
 
 `ARCHITECTURE.md` is the code map. `crates/taskfleet/AGENTS.md` covers the CLI
 crate itself: the snapshot test loop, test-spawn hygiene, profiles, evidence
 capture, and the skill installer. This file holds what is true of the whole
 repository and would otherwise be learned the hard way.
 
+## Code is the record
+
+The code is the single source of truth for what taskfleet does, and the
+repository keeps no second description of it: a description that repeats the
+code drifts the moment the code changes, and nobody is made to correct it. The
+tree therefore holds only what exists nowhere else and has an owner who
+notices when it goes stale:
+
+- the code, with module headers and comments that say why where the code
+  cannot;
+- instructions (`AGENTS.md` files and the bundled skills), including the rules
+  the code cannot show, such as what must never be rebuilt;
+- work that is not yet code: open issues, and a decision or design still
+  waiting for its implementation;
+- interfaces and promises read from outside the repository: `contracts/`, the
+  JSON read contracts in `docs/` that other products consume, the operator
+  guides in `docs/` (`docs/UPGRADE-ADMISSION.md` is cited by path from an
+  external fleet manager and stays at that path), `OSS-RELEASE.md`,
+  `CHANGELOG.md`, and the public front door (`README.md`, `CONTRIBUTING.md`,
+  `SECURITY.md`, `ARCHITECTURE.md`).
+
+Everything else is working material. Issues, ADRs, plans, research and
+evidence are committed while the work is under way, so contributors and the
+maintainer can read them, and removed once the code carries the result; a rule
+the code cannot show moves into the nearest `AGENTS.md` first. A missing issue
+directory or ADR is therefore usually finished work, not lost work. A closed
+issue's directory stays only while an open issue still names it;
+`scripts/prune-closed.py` lists the removable ones and removes them with
+`--apply`, which is committed on its own.
+
+Intent then lives in git history, reached from the code. A commit's
+`Refs-Issue:` or `Fixes-Issue:` trailer names its issue, and a comment may
+name a removed file by its repository path or name: `ADR 0003` means
+`docs/decisions/0003-*.md`, and a bare issue slug in a comment means
+`issues/<slug>/`. `scripts/from-history.sh <path>` prints such a file as it was
+last committed, and `git log --all -- <path>` lists its history. A Markdown
+link always points at a file that exists; a reference into history is a plain
+path. Instructions never point at an issue, open or closed, because the issue
+will be removed and the instruction will not: an instruction states the rule
+itself. `scripts/validate-project-view.py`, part of the release gate, rejects
+an `issues/<slug>` path in an instruction file, a dangling Markdown link, and
+a tracked `TODO.md`.
+
+The session narrative (stint handoffs and archives) is not kept in this
+repository, and nothing here names or points at where it is kept.
+
 ## Decisions that shape the code
 
 **The supervisor is told, not guessing.** ADR 0001
-(`docs/decisions/0001-thin-supervisor-vs-harden.md`, design in
-`issues/lifecycle-architecture-review/design.md`) replaced an inference engine
+(`docs/decisions/0001-thin-supervisor-vs-harden.md` in history, which also
+names the design, root-cause analysis and usage evidence behind it) replaced an inference engine
 that reconstructed a worker's state from a cross-product of proxies (pid
 liveness, tmux panes, branch ancestry, three activity clocks) with a thin
 model: a unit is done only when the worker called `run merge`, and every other
 terminal outcome is a typed table. The proxies were deleted because patching
-one edge case reliably exposed its neighbours. If you find yourself adding a
-heuristic that infers done-ness, idleness, or interactivity from ambient
-signals, you are rebuilding the thing the ADR removed. The TUI, discussion,
-orchestrate, and code-pipeline surfaces were cut in the same release along with
-the `worktree-code` / `worktree-bugfix` / `worktree-make-skill` kinds. Bringing
-any of them back is a new decision, not a restoration.
+one edge case reliably exposed its neighbours; a subsystem whose bugs are
+combinatorial needs an architecture review, not more patches. If you find
+yourself adding a heuristic that infers done-ness, idleness, or interactivity
+from ambient signals, you are rebuilding the thing the ADR removed. The engine
+knows only topology (a single-node run, or a fan-out of N nodes under one
+rollup) plus the explicit `--interactive` flag; research, technical decisions
+and bug analysis are recipes over the generic spinoff, and which harness runs
+a worker is a launcher-level choice the operator makes through profiles, never
+a special case in the engine. The TUI, discussion, orchestrate, and
+code-pipeline surfaces were cut in the same release along with the
+`worktree-code` / `worktree-bugfix` / `worktree-make-skill` kinds. Bringing
+any of them back is a new decision, not a restoration. Worker self-reporting
+of lifecycle transitions and a supervisor liveness lease were deferred then,
+not built since; the advisory worker telemetry is not that protocol, because
+it can never change status. Run directories under `~/.taskfleet/runs/` are
+evidence even when their kind was cut: `doctor` may report them, nothing
+deletes them, and old records decode read-only. Every worker may use web
+tools, an accepted exposure for a single-user tool; multi-user use or
+untrusted repositories would call for recipe-declared capabilities instead.
 
-**One identity.** ADR 0002 (`docs/decisions/0002-taskfleet-identity.md`): the
-workspace is exactly `taskfleet-core` and `taskfleet`, the only executable is
-`taskfleet`, state lives only under `~/.taskfleet`, and the code contains no
-alias, migration, wrapper, or transition artifact for any earlier name.
+**One identity.** ADR 0002 (`docs/decisions/0002-taskfleet-identity.md` in
+history): the workspace is exactly `taskfleet-core` and `taskfleet`, the only
+executable is `taskfleet`, state lives only under `~/.taskfleet` (selected only
+by `TASKFLEET_HOME`), repository configuration is only `.taskfleet.toml`, and
+the code contains no alias, migration, wrapper, or transition artifact for any
+earlier name. Published registry artifacts and git history under earlier
+names are immutable and are left alone.
+
+**Named residents work in told rounds.** ADR 0003
+(`docs/decisions/0003-resident-workers.md` in history). A resident
+(`run create --resident --name`) is an ordinary autonomous, single-node,
+Taskfleet-owned run whose worker ends each round with `node round-report`. The
+exit that follows is expected: a told round report outranks a later failing
+exit and suppresses the crash backstop, and the node waits. `run message`
+starts the next round from the same native session (Pi `--session`, Claude
+`--resume`) in the same worktree path after rebasing onto the source tip; the
+message text never enters the event log. Round work reaches the source branch
+only through the parent's explicit `run land`, a recorded non-terminal merge
+on `run merge`'s transaction machinery. The supervisor never lands, merges, or
+auto-retries a resident (a retry would discard the continuity the run exists
+for). Idle expiry is a timer on the told round report, not an activity clock:
+it removes the worktree only when git proves the branch integrated and the
+tree clean, and otherwise flags attention and preserves everything.
+`run interrupt` records the round report before it signals the worker, so the
+signalled exit is an ordinary round end. Message, land, and expiry serialize
+on the run's resident operation lock. Names start with a lowercase letter, so
+they can never be read as a run-id prefix, and are scoped by repository and
+creator session (`TASKFLEET_CREATOR_SESSION`); the scope is a namespace, not
+access control.
+
+**A worker asks its parent, not a person.** ADR 0004
+(`docs/decisions/0004-worker-questions-to-parent.md` in history). `node ask`
+appends a durable `node.asked` and blocks; `run answer`, `run escalate`, and a
+passed deadline close it. The question's id is the seq of its `node.asked` and
+the first closing event wins, so a stale answer cannot close a newer question.
+`--default` is required and the deadline is fixed once from the ask's
+timestamp. The commands, not the supervisor, record a passed deadline under
+the exclusive lock, and the reducer folds the first closing event without
+judging timestamps, so replay stays a pure function of the log and the
+supervisor stays out of it. Ending a node or attempt cancels an open question
+by fold, not by an event; idempotency keys are scoped to the node and worker
+attempt. The question and answer pass only between a worker and its parent
+agent: Taskfleet adds no human-facing surface, and a question does not set
+`awaiting_input`, whose grace exists to spare a person a page.
 
 **Non-blocking waits are not this repository's problem.** A homebase decision
-(ADR 0011 there) superseded the closed `pi-background-jobs-extension` issue.
-Session-scoped background commands inside a pi.dev session belong to the host
-runtime, which may use the third-party `@aliou/pi-processes` extension; its
-processes dying with the pi session is a safety property. Durable background
-running belongs behind a separate, harness-neutral runner contract. taskfleet
-therefore stays the run-state owner behind `run wait`, the `landed` flag, and
-its JSON contracts, and it does not import that extension, reach into its
-manager object, assume its process ids or log paths, or use its in-process
-EventBus. A pi extension's internals are not a public interface. Do not file a
-"build our own pi background-jobs extension" issue here; that option was
-evaluated and rejected.
+(ADR 0011 there) settled that session-scoped background commands inside a
+pi.dev session belong to the host runtime, which may use the third-party
+`@aliou/pi-processes` extension; its processes dying with the pi session is a
+safety property. Durable background running belongs behind a separate,
+harness-neutral runner contract. taskfleet therefore stays the run-state owner
+behind `run wait`, the `landed` flag, and its JSON contracts, and it does not
+import that extension, reach into its manager object, assume its process ids
+or log paths, or use its in-process EventBus. A pi extension's internals are
+not a public interface. Building our own pi background-jobs extension was
+evaluated and rejected; do not file it as work here.
 
 ## The tool family
 
@@ -75,13 +176,20 @@ Every directory follows one pattern: `AGENTS.md` holds the agent-relevant
 knowledge, `CLAUDE.md` is a symlink to it, and an optional `AGENTS-<TOPIC>.md`
 splits out a large topic.
 
+Reports from users arrive through GitHub Issues and Discussions. `issues/` is
+the tracker of accepted work, not an inbox: an accepted report is filed with
+`issuectl intake file --source-ref <canonical URL>` so the issue leads back to
+the conversation. Intake that arrives from the maintainer's own intake tooling
+is equally valid.
+
 Issues are `issues/<slug>/item.md`, flat, with status in the `status:`
 frontmatter field rather than the path. Use the `/issue` skill and `issuectl`
 for every mutation; the frontmatter is schema-validated and hand edits break
 the optimistic-concurrency tokens. Every planning document (plan, analysis,
-validation, design, breakdown, todo) lives under its issue directory, so work
-that needs a planning document also needs an issue. `TODO.md` is only the
-session handoff and a compact stint archive; it is not a schedule.
+validation, design, breakdown) lives under its issue directory while the work
+is open, so work that needs a planning document also needs an issue. Commits
+carry `Refs-Issue: @<slug>`, or `Fixes-Issue:` when they complete it; that
+trailer is the link that survives the issue's removal.
 
 `history/` (agent scratch) and `target/` are gitignored. An issue that only
 points at a `history/` file is unreadable to anyone else, so a review residual
@@ -89,10 +197,20 @@ becomes an issue only with an observed occurrence or a self-contained
 description. Filing every deferred residual from an automated review
 manufactures work nobody asked for.
 
+## Writing for a public project
+
+This repository is public. Nothing written for the project (issues, slugs,
+commit messages, code, test fixtures, run titles, branch names, documents)
+names a real installation's hosts, people, home paths, or accounts. Use
+synthetic ones (`/home/alice`, `host-a`, `example.org`), including when the
+report you are working from carries the real ones.
+
 ## Working in this repository
 
 This section is what `/stint-start` reads when it orients. Every project-specific
-fact an orchestrator or worker needs is here or pointed to from here.
+fact an orchestrator or worker needs is here or pointed to from here. The
+stint handoff file is not kept in this repository; do not create a `TODO.md`
+here.
 
 **Coding happens in worktrees.** The orchestrator session plans, spawns, reads,
 and reports; it does not edit code. Spawn `/worktree-spinoff <issue-slug>` and
@@ -103,8 +221,8 @@ the bundled skills describe the placement flags. `taskfleet event tail
 <run-id> --follow` streams completions so you need not poll.
 
 **Git is the truth about landings.** `run` status can lag reality, so confirm
-every landing from git before reporting it. Handoffs describe the state as it
-was.
+every landing from git before reporting it. A handoff describes the state as
+it was when written.
 
 **Check the installed binary before spending a worker.** Three stints in a
 row, intake reports described either a defect the current release had already
@@ -131,11 +249,12 @@ account, and no reset step for this project.
 **The green gate is one script.** Run `scripts/validate-local-release.sh`
 before merging any worktree. It is the sole maintained aggregation of the
 repository and release checks: fmt, clippy with warnings denied, release-mode
-nextest, doctests, rustdoc with warnings denied, snapshot and identity checks,
-cargo-deny, the shell release fixtures, package archives, the Shipshape
-contract, and cargo-dist plan topology. It pins every Rust subprocess to
-rustup's current `stable` channel and fails closed when a prerequisite is
-missing (`cargo-nextest`, `cargo-deny`, `gh`, `jq`, `python3`, `shipshape`, or
+nextest, doctests, rustdoc with warnings denied, snapshot, identity, and
+project-view checks, cargo-deny, the shell release fixtures, package
+archives, the Shipshape contract, and cargo-dist plan topology. There is no
+pull-request CI workflow; this script is where every check runs. It pins every
+Rust subprocess to rustup's current `stable` channel and fails closed when a
+prerequisite is missing (`cargo-nextest`, `cargo-deny`, `gh`, `jq`, `python3`, `shipshape`, or
 cargo-dist 0.33.0 via `DIST_BIN`). Copy that exact command into worker briefs.
 A debug-mode `cargo test` passes in a worktree and turns `main` red. An
 orchestrator may install the test runner once with
@@ -145,7 +264,7 @@ globally. Two of the gate's steps exist because nothing else catches their
 failures: doctests, because nextest does not run them, and rustdoc, because
 neither tests nor clippy notice a dangling intra-doc link. A cut that removes a
 symbol leaves any `[`crate::…`]` link to it dangling; this made `main` red once
-(`ci-red-main`, 2026-08-15) after a green test-and-clippy round.
+(2026-08-15) after a green test-and-clippy round.
 
 **Linux gate environment.** Use a short private disk-backed `TMPDIR` such as
 `mktemp -d /var/tmp/tfg.XXXXXX` with mode 0700 and `umask 077`. Tests derive
@@ -286,9 +405,8 @@ merge`, or supervisor cleanup. What follows is what each one protects.
    kind. `Status` is `Pending | Running | Blocked | Done | Failed | Cancelled`;
    nothing produces `Blocked` since the discussion cut, but the variant stays
    so historic runs still decode. A skill that polls `lifecycle` for a
-   terminal value hangs forever, which was a real bug
-   (`skill-progress-polling-wrong-field`). In interactive mode the supervisor
-   never auto-terminalizes or tears down from a dead pid or worker exit; it
+   terminal value hangs forever, which was a real bug. In interactive mode
+   the supervisor never auto-terminalizes or tears down from a dead pid or worker exit; it
    waits for an explicit `run merge` or `run cancel`.
 
 5. **The supervisor is the only teardown actor, and unmerged work survives
@@ -312,7 +430,7 @@ merge`, or supervisor cleanup. What follows is what each one protects.
    choice: spawn first, record the `run.notified` marker after, tracked
    separately from `cleaned`. Reordering either silently drops notifications
    on a crash. The module doc lists the exact guards, reason strings, and the
-   known residual TOCTOU (`detached-head-teardown-toctou`).
+   known residual TOCTOU around a detached HEAD.
 
 6. **`run merge` is a recorded, OID-recoverable transaction**
    (`crates/taskfleet/src/run/{merge,merge_recovery}.rs`,

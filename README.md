@@ -180,10 +180,12 @@ Repo layout:
 - `crates/taskfleet-core/`: schema, event log, locking, reducer, atomic file I/O.
 - `crates/taskfleet/`: the `taskfleet` binary, supervisor, and bundled
   skills (`skills/<name>/SKILL.template.md`, embedded at build time).
-- `issues/<slug>/`: issues, epics, and their design docs, managed by
-  [`issuectl`](https://github.com/jarimustonen/issuectl).
-- `docs/decisions/`: architecture decision records, including ADR 0001
-  (the thin-supervisor model behind the 0.2 series).
+- `issues/<slug>/`: accepted open work and its design documents, managed by
+  [`issuectl`](https://github.com/jarimustonen/issuectl). Closed issues and
+  implemented decision records live in git history
+  (`scripts/from-history.sh <path>`).
+- `contracts/` and `docs/`: the interface contracts and operator guides that
+  other tools and operators read.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the code map and process
 boundaries. `AGENTS.md` contains the operating policy and state-integrity

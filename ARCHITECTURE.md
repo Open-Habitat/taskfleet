@@ -13,10 +13,13 @@ the only command and hidden subprocesses re-execute that exact current binary.
 - `contracts/worker-telemetry-v1/` is the runtime-neutral adapter contract. Its
   `TASKFLEET_*` variables and `taskfleet.worker-telemetry-adapter` id form its
   protocol vocabulary.
-- `docs/decisions/` records architectural decisions. ADR 0002 establishes
-  Taskfleet as the repository's sole identity; ADR 0003 adds named resident
-  workers that work in told rounds; ADR 0004 lets a worker ask its parent a
-  blocking question.
+- `contracts/worker-admission-v1/` is the fleet-activation contract an
+  external fleet manager uses; `docs/` holds the JSON read contracts other
+  products consume and the operator guides.
+- The decisions that shape the code (the thin told-not-guessed supervisor,
+  the single identity, named resident workers, and worker questions to the
+  parent) are stated in the root `AGENTS.md`. Their ADRs, like closed issues,
+  are in git history once implemented (`scripts/from-history.sh`).
 
 ## State and process boundaries
 
@@ -54,7 +57,7 @@ never answer prompts or grant teardown authority. `run wait --check-in` bounds
 parent inspection without inventing worker state from activity proxies. See
 [Claude prompt signals](docs/CLAUDE-PROMPT-SIGNALS.md) for supported paths and unknowns.
 
-A named resident run (ADR 0003, `run/resident.rs`) keeps its worktree,
+A named resident run (`run/resident.rs`) keeps its worktree,
 branch, and native session between rounds. `node round-report` is the told end
 of a round, `run message` resumes the recorded Pi or Claude session in the same
 worktree after rebasing onto the source (`run/resume.rs`), `run land` is a
@@ -62,7 +65,7 @@ recorded non-terminal merge (`run/land.rs`), and the supervisor's
 `supervise/resident.rs` notifies on round reports and applies idle expiry
 without ever merging.
 
-A worker's blocking question to its parent (ADR 0004) is four told node
+A worker's blocking question to its parent is four told node
 events: `node ask` (`node/ask.rs`) appends `node.asked` and polls the node
 projection; the parent's `run answer` / `run escalate` (`run/ask.rs`) close or
 escalate it by id; whichever command first finds it past its deadline under the

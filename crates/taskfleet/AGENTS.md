@@ -28,7 +28,8 @@ it freezes its answers for the process so a command cannot switch state roots
 midway. Help output does not touch the filesystem, so `--help` works with no
 home and no config.
 
-ADR 0002 made the identity single: no second home, config file, resolver,
+ADR 0002 (`docs/decisions/0002-taskfleet-identity.md` in history) made the
+identity single: no second home, config file, resolver,
 state mover, or transition warning for any earlier name. This is enforced
 mechanically. `scripts/check-canonical-identity.sh` fails the gate on any
 tracked path or text that mentions the retired name, comments and test
@@ -67,10 +68,9 @@ touched. `doctor` reports pi drift but offers no automatic fix, because the
 fix command reinstalls to all runtimes with `--force` and would overwrite a
 deliberately newer or edited Claude copy. The record's read-modify-write is
 unlocked, like the Claude and Codex markers, so two installs at once can lose
-each other's additions. The history and the reasons for the flat model are in
-the issues `pidev-pi-skill-lifecycle` and `pi-provenance-flat-file-model`; the
-mechanics are in `src/skill.rs` around `cmd_install` and in
-`src/doctor/checks/skill.rs`.
+each other's additions. The mechanics are in `src/skill.rs` around
+`cmd_install` and in `src/doctor/checks/skill.rs`; `git log` on those files
+carries the rest of the reasoning.
 
 Repository work leaves the developer's installed skills alone (root
 `AGENTS.md`), and the tests honour that by pointing `HOME` and
@@ -98,8 +98,8 @@ version, so a version bump stales them like any other surface change;
 `scripts/check-version-snapshots.sh` exists because that once surfaced only
 on `main` after a tag. The release bump hook regenerates those five fixtures
 using stable's real Cargo in its own checkout: an ambient offload wrapper can
-drop `INSTA_UPDATE` and leave regenerated files in a remote sandbox (the
-0.17.1 bump failure, `release-bump-version-snapshots`). Keep its isolated
+drop `INSTA_UPDATE` and leave regenerated files in a remote sandbox, which
+broke the 0.17.1 bump. Keep its isolated
 protocol fixture's lookup-only rustup stub aligned with that tool selection.
 The release gate also refuses to run with any `.snap.new` left in the tree.
 
@@ -149,7 +149,8 @@ create time from static eligibility (missing executable, autonomous harness
 support, telemetry support), so a launch or runtime failure never advances to
 the next candidate; and a retry regenerates its launcher from the recorded
 `manifest.agent_selection`, never from current config, so a run reproduces
-its own launch. Autonomous runs accept pi with the `worker-v1` telemetry adapter
+its own launch and a retry is never a way to move a run to another profile.
+Autonomous runs accept pi with the `worker-v1` telemetry adapter
 (`contracts/worker-telemetry-v1/`) or Claude without telemetry. Explicit
 interactive runs accept pi or Claude. Claude's headless launcher adds `--print`
 and archives only its final pane and terminal report, not a Pi transcript.
@@ -161,6 +162,20 @@ permission decision is involved. Tool progress clears legacy hook-owned idle inp
 not parallel permission prompts; only main turn boundaries clear the latter.
 Mixed/manual requests remain explicitly resolved. Missing hooks are unknown,
 not health; parents can use `run wait --check-in 30m` (outcome check-in, exit 4).
+
+Worker telemetry is advisory. Its samples are replaceable projections that
+can never report, change status, select a retry, satisfy a wait, prove a merge
+or landing, classify an outcome, authorize cleanup, or delete work; corrupt,
+missing, or stale telemetry stays a localized warning and is never turned into
+failure, retry, or completion, and nothing repairs canonical state from it.
+The production pi adapter is a separately owned package. This repository
+tests its side of the boundary only through the published v1 contract and its
+`conformance.json` traces: the test fake submits caller-supplied bytes to the
+public `node telemetry update` endpoint and contains no pi hooks, timers, or
+adapter code, so a passing suite is no claim about real pi hooks. Rolling back
+a telemetry profile means selecting another one and letting existing runs
+finish; nothing edits run projections or telemetry samples, and taskfleet
+never installs or edits global pi extensions.
 
 Launch is native code in `src/run/spawn.rs`. The generated launcher publishes
 its own PID through the hidden `worker-handshake` command immediately before
@@ -243,8 +258,8 @@ Every materialized prompt gets a preamble from
 policy because it is the only text that knows the exact run id and reaches
 workers launched from a custom `--task` or `--prompt-file`, which no bundled
 skill does. Today it carries the closing identity, the decision path (ask the
-parent with `node ask` and continue on the answer or the stated default, ADR
-0004), and the issue-filing
+parent with `node ask` and continue on the answer or the stated default), and
+the issue-filing
 boundary (worker-filed issues go through `issuectl intake file`, are born
 unlaned, and carry machine-visible `ai-review` provenance), plus, for pi
 research workers only, the translation shim for Claude-flavoured briefs and
