@@ -207,9 +207,9 @@ supervisors from `~/.cargo/bin` or Homebrew are untouched.
 publication workflows: `.github/workflows/publish-crates.yml` publishes
 `taskfleet-core` and then the exact-pinned `taskfleet` to crates.io, and
 cargo-dist's generated `release.yml` builds the binaries, the GitHub Release,
-and the canonical Homebrew tap `jarimustonen/homebrew-taskfleet` (the mac
+and the canonical Homebrew tap `Open-Habitat/homebrew-taskfleet` (the mac
 target on a self-hosted runner; the canonical install is
-`brew install jarimustonen/taskfleet/taskfleet`). crates.io versions are
+`brew install open-habitat/taskfleet/taskfleet`). crates.io versions are
 permanent and can only be yanked, so a bad tag is fixed forward with a new
 patch, not undone. Nothing publishes from a local machine: a local
 `cargo publish` would race the workflow and leave a half-published saga.

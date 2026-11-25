@@ -50,8 +50,8 @@ if [[ "$1" == --version ]]; then echo 'cargo stable (fixture)'; exit 0; fi
 if [[ "$1" == metadata ]]; then
   target_dir="${CARGO_TARGET_DIR:-$FIXTURE_ROOT/target}"
   jq -n --arg root "$FIXTURE_ROOT" --arg target "$target_dir" '{target_directory:$target,packages:[
-    {name:"taskfleet-core",version:"1.2.3",manifest_path:($root+"/crates/taskfleet-core/Cargo.toml"),repository:"https://github.com/jarimustonen/taskfleet",homepage:"https://github.com/jarimustonen/taskfleet",license:"MIT",rust_version:null,description:"core",dependencies:[]},
-    {name:"taskfleet",version:"1.2.3",manifest_path:($root+"/crates/taskfleet/Cargo.toml"),repository:"https://github.com/jarimustonen/taskfleet",homepage:"https://github.com/jarimustonen/taskfleet",license:"MIT",rust_version:null,description:"cli",dependencies:[{name:"taskfleet-core",req:"=1.2.3",kind:null,optional:false,target:null,uses_default_features:true,features:[]}]}
+    {name:"taskfleet-core",version:"1.2.3",manifest_path:($root+"/crates/taskfleet-core/Cargo.toml"),repository:"https://github.com/Open-Habitat/taskfleet",homepage:"https://github.com/Open-Habitat/taskfleet",license:"MIT",rust_version:null,description:"core",dependencies:[]},
+    {name:"taskfleet",version:"1.2.3",manifest_path:($root+"/crates/taskfleet/Cargo.toml"),repository:"https://github.com/Open-Habitat/taskfleet",homepage:"https://github.com/Open-Habitat/taskfleet",license:"MIT",rust_version:null,description:"cli",dependencies:[{name:"taskfleet-core",req:"=1.2.3",kind:null,optional:false,target:null,uses_default_features:true,features:[]}]}
 
   ]}'
   exit 0
@@ -105,7 +105,7 @@ case "$url" in
     checksum="$(sha256sum "$archive" | awk '{print $1}')"
     description=cli; [[ "$REGISTRY_MODE" != metadata-mismatch ]] || description=wrong
     yanked=false; [[ "$REGISTRY_MODE" != yanked ]] || yanked=true
-    jq -n --arg checksum "$checksum" --arg description "$description" --argjson yanked "$yanked" '{version:{checksum:$checksum,yanked:$yanked,license:"MIT",rust_version:null,repository:"https://github.com/jarimustonen/taskfleet",homepage:"https://github.com/jarimustonen/taskfleet",description:$description}}' >"$output"
+    jq -n --arg checksum "$checksum" --arg description "$description" --argjson yanked "$yanked" '{version:{checksum:$checksum,yanked:$yanked,license:"MIT",rust_version:null,repository:"https://github.com/Open-Habitat/taskfleet",homepage:"https://github.com/Open-Habitat/taskfleet",description:$description}}' >"$output"
     printf 200 ;;
   */crates/taskfleet/owners)
     if [[ "$REGISTRY_MODE" == secondary500 || "$REGISTRY_MODE" == secondary-after-publish ]]; then : >"$output"; printf 500; exit 0; fi
@@ -153,7 +153,7 @@ run_case() {
   env -i HOME="$tmp" PATH="$tmp/bin" FIXTURE_ROOT="$fixture_root" CARGO_LOG="$tmp/cargo.log" CURL_COUNT="$tmp/curl-count" \
     REGISTRY_MODE="$mode" RELEASE_RECEIPT_DIR="$tmp/receipts-$mode" SOURCE_COMMIT=1111111111111111111111111111111111111111 \
     GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v1.2.3 \
-    GITHUB_REPOSITORY=jarimustonen/taskfleet GITHUB_SHA=1111111111111111111111111111111111111111 \
+    GITHUB_REPOSITORY=Open-Habitat/taskfleet GITHUB_SHA=1111111111111111111111111111111111111111 \
     CARGO_REGISTRY_TOKEN=test-token "$tmp/repo/scripts/publish-crates.sh" publish taskfleet >"$tmp/$mode.out" 2>"$tmp/$mode.err"
   status=$?
   set -e
@@ -200,7 +200,7 @@ mv "$tmp/topology.json" "$tmp/repo/release/taskfleet-release.json"
 : >"$tmp/cargo.log"
 set +e
 env -i HOME="$tmp" PATH="$tmp/bin" FIXTURE_ROOT="$fixture_root" CARGO_LOG="$tmp/cargo.log" SOURCE_COMMIT=1111111111111111111111111111111111111111 \
-  GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v1.2.3 GITHUB_REPOSITORY=jarimustonen/taskfleet \
+  GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v1.2.3 GITHUB_REPOSITORY=Open-Habitat/taskfleet \
   GITHUB_SHA=1111111111111111111111111111111111111111 CARGO_REGISTRY_TOKEN=test-token \
   "$tmp/repo/scripts/publish-crates.sh" publish taskfleet >"$tmp/blocked.out" 2>"$tmp/blocked.err"
 status=$?

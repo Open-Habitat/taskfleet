@@ -86,7 +86,7 @@ if [[ "$*" == "rev-parse --verify refs/tags/$TAG" ]]; then
 fi
 case "$*" in
   "rev-parse --show-toplevel") printf '%s\n' "$GIT_STUB_ROOT" ;;
-  "remote get-url origin"|"remote get-url --push --all origin") printf '%s\n' 'git@github.com:jarimustonen/taskfleet.git' ;;
+  "remote get-url origin"|"remote get-url --push --all origin") printf '%s\n' 'git@github.com:Open-Habitat/taskfleet.git' ;;
   "symbolic-ref --quiet --short HEAD") printf '%s\n' main ;;
   "cat-file -e "*) [[ "${HELD_VARIANT:-valid}" != missing-local-tag ]] ;;
   "rev-parse --git-common-dir") printf '%s\n' "$GIT_COMMON" ;;
@@ -130,8 +130,8 @@ fi
 if [[ "$1" == release && "$2" == download ]]; then
   cp "$FIXTURE_ARCHIVE" "${!#}/shipshape-$FIXTURE_PLATFORM.tar.xz"; exit 0
 fi
-if [[ "$*" == 'repo view jarimustonen/taskfleet --json nameWithOwner -q .nameWithOwner' ]]; then
-  printf '%s\n' jarimustonen/taskfleet
+if [[ "$*" == 'repo view Open-Habitat/taskfleet --json nameWithOwner -q .nameWithOwner' ]]; then
+  printf '%s\n' Open-Habitat/taskfleet
   exit 0
 fi
 if [[ "$*" == run\ list* ]]; then
@@ -178,7 +178,7 @@ tar -cJf "$tmp/release.tar.xz" -C "$tmp/archive" "shipshape-${fixture_platform}"
 fixture_sha="$(shasum -a 256 "$tmp/release.tar.xz" | awk '{print $1}')"
 
 write_checkpoint() {
-  local remote="${1:-git@github.com:jarimustonen/taskfleet.git}"
+  local remote="${1:-git@github.com:Open-Habitat/taskfleet.git}"
   jq -n --arg run "$run_id" --arg tag "$tag" --arg bump "$bump_commit" --arg oid "$tag_oid" --arg remote "$remote" '
     {schema_version:1,run_id:$run,tag:$tag,bump_commit:$bump,
      marker:["origin",$remote,"refs/tags/"+$tag,$oid,"refs/tags/"+$tag,"0000000000000000000000000000000000000000"]}' \

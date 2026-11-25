@@ -87,7 +87,7 @@ if [[ "$1" == release && "$2" == download ]]; then
   exit 0
 fi
 if [[ $# -eq 7 && "$1" == repo && "$2" == view &&
-      "$3" == "${GH_STUB_VIEW_EXPECTED:-jarimustonen/taskfleet}" && "$4" == --json &&
+      "$3" == "${GH_STUB_VIEW_EXPECTED:-Open-Habitat/taskfleet}" && "$4" == --json &&
       "$5" == nameWithOwner && "$6" == -q && "$7" == .nameWithOwner ]]; then
   printf '%s\n' "$GH_STUB_REPO"
   exit 0
@@ -131,9 +131,9 @@ fixture_sha="$(shasum -a 256 "$tmp/release.tar.xz" | awk '{print $1}')"
 readonly test_run_id="01M0JA657EJJJYC7J7230JF42N"
 
 run_wrapper() {
-  local gh_repo="${1:-jarimustonen/taskfleet}"
-  local origin="${2:-git@github.com:jarimustonen/taskfleet.git}"
-  local view_expected="${3:-jarimustonen/taskfleet}"
+  local gh_repo="${1:-Open-Habitat/taskfleet}"
+  local origin="${2:-git@github.com:Open-Habitat/taskfleet.git}"
+  local view_expected="${3:-Open-Habitat/taskfleet}"
   local candidate_run="${4:-$test_run_id}"
   env -i \
     HOME="$tmp/home" \
@@ -172,7 +172,7 @@ assert_no_release_show() {
 for malformed in lowercase01m0ja657ejjjyc7j7230jf42n '../run' '--help' '01M0JA657EJJJYC7J7230JF42N;touch'; do
   reset_logs
   set +e
-  run_wrapper jarimustonen/taskfleet git@github.com:jarimustonen/taskfleet.git jarimustonen/taskfleet "$malformed"
+  run_wrapper Open-Habitat/taskfleet git@github.com:Open-Habitat/taskfleet.git Open-Habitat/taskfleet "$malformed"
   status=$?
   set -e
   [[ "$status" -eq 2 ]] || { echo "malformed run id was not rejected: $malformed" >&2; exit 1; }
@@ -199,15 +199,15 @@ grep -Fx "release show $test_run_id --json" "$tmp/shipshape.log" >/dev/null || {
 
 # Repository identity is read from the admitted topology rather than duplicated
 # in the wrapper. Prove an isolated future-R9 coordinate flows to git and gh.
-jq '.repository = "jarimustonen/taskfleet"' "$tmp/work/release/taskfleet-release.json" >"$tmp/topology.json"
+jq '.repository = "Open-Habitat/taskfleet"' "$tmp/work/release/taskfleet-release.json" >"$tmp/topology.json"
 mv "$tmp/topology.json" "$tmp/work/release/taskfleet-release.json"
 reset_logs
 set +e
-run_wrapper jarimustonen/taskfleet git@github.com:jarimustonen/taskfleet.git jarimustonen/taskfleet
+run_wrapper Open-Habitat/taskfleet git@github.com:Open-Habitat/taskfleet.git Open-Habitat/taskfleet
 status=$?
 set -e
 [[ "$status" -eq 42 ]] || { echo "data-driven repository coordinate was rejected" >&2; cat "$tmp/stderr" >&2; exit 1; }
-grep -Fx 'repo view jarimustonen/taskfleet --json nameWithOwner -q .nameWithOwner' "$tmp/gh.log" >/dev/null
+grep -Fx 'repo view Open-Habitat/taskfleet --json nameWithOwner -q .nameWithOwner' "$tmp/gh.log" >/dev/null
 cp "$repo_root/release/taskfleet-release.json" "$tmp/work/release/"
 
 reset_logs
@@ -220,7 +220,7 @@ set -e
   cat "$tmp/stderr" >&2
   exit 1
 }
-grep -Fx 'release repository mismatch: origin=jarimustonen/taskfleet push=jarimustonen/taskfleet gh=unrelated-owner/unrelated-repo expected=jarimustonen/taskfleet' "$tmp/stderr" >/dev/null || {
+grep -Fx 'release repository mismatch: origin=Open-Habitat/taskfleet push=Open-Habitat/taskfleet gh=unrelated-owner/unrelated-repo expected=Open-Habitat/taskfleet' "$tmp/stderr" >/dev/null || {
   echo "GitHub repository mismatch did not emit the expected diagnostic" >&2
   cat "$tmp/stderr" >&2
   exit 1
@@ -229,7 +229,7 @@ assert_no_release_show
 
 reset_logs
 set +e
-run_wrapper jarimustonen/taskfleet https://github.com/unrelated-owner/unrelated-repo.git
+run_wrapper Open-Habitat/taskfleet https://github.com/unrelated-owner/unrelated-repo.git
 status=$?
 set -e
 [[ "$status" -eq 1 ]] || {
@@ -237,7 +237,7 @@ set -e
   cat "$tmp/stderr" >&2
   exit 1
 }
-grep -Fx 'release repository mismatch: origin=unrelated-owner/unrelated-repo push=unrelated-owner/unrelated-repo gh=jarimustonen/taskfleet expected=jarimustonen/taskfleet' "$tmp/stderr" >/dev/null || {
+grep -Fx 'release repository mismatch: origin=unrelated-owner/unrelated-repo push=unrelated-owner/unrelated-repo gh=Open-Habitat/taskfleet expected=Open-Habitat/taskfleet' "$tmp/stderr" >/dev/null || {
   echo "origin repository mismatch did not emit the expected diagnostic" >&2
   cat "$tmp/stderr" >&2
   exit 1
@@ -279,11 +279,11 @@ for abandoned in 01M0FD8FSTMGYG8YTV92WMWC87 01M0FG88NAKBJ7Y3QNFZEHRM4K; do
   reset_logs
   set +e
   env -i HOME="$tmp/home" PATH="$tmp/bin" GH_STUB_LOG="$tmp/gh.log" GIT_STUB_LOG="$tmp/git.log" \
-    GIT_STUB_ROOT="$tmp/work" GIT_STUB_ORIGIN=git@github.com:jarimustonen/taskfleet.git \
+    GIT_STUB_ROOT="$tmp/work" GIT_STUB_ORIGIN=git@github.com:Open-Habitat/taskfleet.git \
     SHIPSHAPE_STUB_LOG="$tmp/shipshape.log" SHIPSHAPE_STUB_VERSION=0.12.4 \
     FIXTURE_ARCHIVE="$tmp/release.tar.xz" FIXTURE_SHA="$fixture_sha" FIXTURE_PLATFORM="$fixture_platform" \
     SHIPSHAPE_STUB_COMMIT=8db733bd70f566ab39b4cd774901c6e2ca8fd2c3 \
-    FORMULA_VERSION=0.12.4 GH_STUB_REPO=jarimustonen/taskfleet "$repo_root/scripts/shipshape-release.sh" resume "$abandoned" \
+    FORMULA_VERSION=0.12.4 GH_STUB_REPO=Open-Habitat/taskfleet "$repo_root/scripts/shipshape-release.sh" resume "$abandoned" \
     >"$tmp/stdout" 2>"$tmp/stderr"
   status=$?
   set -e
@@ -294,7 +294,7 @@ done
 
 set +e
 env -i PATH="$tmp/bin" GH_STUB_LOG="$tmp/gh.log" GH_STUB_REPO=unused \
-  "$tmp/bin/gh" repo view -R jarimustonen/taskfleet \
+  "$tmp/bin/gh" repo view -R Open-Habitat/taskfleet \
   --json nameWithOwner -q .nameWithOwner >/dev/null 2>&1
 status=$?
 set -e

@@ -15,6 +15,6 @@ if grep -F 'secrets: inherit' "$workflow" >/dev/null; then
   echo "release workflow must not inherit secrets" >&2
   exit 2
 fi
-[[ "$(grep -c 'repository: "jarimustonen/homebrew-taskfleet"' "$workflow")" == 1 ]]
+[[ "$(grep -c 'repository: "Open-Habitat/homebrew-taskfleet"' "$workflow")" == 1 ]]
 grep -F 'name = "taskfleet"' crates/taskfleet/Cargo.toml >/dev/null
 printf 'Taskfleet distribution policy tests passed\n'

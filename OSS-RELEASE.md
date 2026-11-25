@@ -16,7 +16,7 @@ distributions:
     adapter: cargo-dist
     gh_releases: true
     installers: [shell, homebrew]
-    homebrew_tap: jarimustonen/homebrew-taskfleet
+    homebrew_tap: Open-Habitat/homebrew-taskfleet
     platforms: [aarch64-apple-darwin, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu]
 provenance_level: keyless
 dependency_bot: dependabot

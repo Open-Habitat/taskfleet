@@ -20,7 +20,7 @@ done
 : "${GITHUB_REF_TYPE:?GITHUB_REF_TYPE is required}"
 : "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
 
-[[ "$GITHUB_REPOSITORY" == "jarimustonen/taskfleet" ]] || fail "unexpected repository"
+[[ "$GITHUB_REPOSITORY" == "Open-Habitat/taskfleet" ]] || fail "unexpected repository"
 repository_node_id="$(gh api "repos/$GITHUB_REPOSITORY" --jq .node_id)" || fail "repository identity lookup failed"
 [[ "$repository_node_id" == "R_kgDOS3Iezw" ]] || fail "repository identity mismatch"
 [[ "$GITHUB_REF_TYPE" == tag ]] || fail "event ref is not a tag"

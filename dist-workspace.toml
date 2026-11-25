@@ -20,7 +20,7 @@ github-build-setup = "../build-setup.yml"
 # The installers to generate for each app
 installers = ["shell", "homebrew"]
 # Sole generated Homebrew destination.
-tap = "jarimustonen/homebrew-taskfleet"
+tap = "Open-Habitat/homebrew-taskfleet"
 # Authorization executes inside every local build via github-build-setup. An
 # unauthorized tag therefore makes the build dependency fail (never skip), so
 # cargo-dist's permissive skipped-build host condition cannot publish.

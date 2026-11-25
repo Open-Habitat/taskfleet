@@ -86,9 +86,9 @@ TOML
 cat >"$tmp/bin/gh" <<'STUB'
 #!/bin/sh
 case "$*" in
-  'api repos/jarimustonen/taskfleet --jq .node_id')
+  'api repos/Open-Habitat/taskfleet --jq .node_id')
     printf '%s\n' "${REPO_NODE_ID:?}" ;;
-  'api repos/jarimustonen/taskfleet/git/ref/heads/taskfleet-release-authorizations/v0.6.0')
+  'api repos/Open-Habitat/taskfleet/git/ref/heads/taskfleet-release-authorizations/v0.6.0')
     [ "${AUTH_REF_EXISTS:-1}" = 1 ] || exit 1
     jq -n --arg sha "${AUTH_SHA:?}" '{ref:"refs/heads/taskfleet-release-authorizations/v0.6.0",object:{type:"commit",sha:$sha}}' ;;
   *) echo "unexpected gh invocation: $*" >&2; exit 97 ;;
@@ -102,7 +102,7 @@ sha="$(git -C "$tmp/repo" rev-parse HEAD)"
 run_auth() {
   (cd "$tmp/repo" && env -i PATH="$tmp/bin:/usr/bin:/bin" ACTIVATION_OK="${ACTIVATION_OK:-1}" POLICY_OK="${POLICY_OK:-1}" \
     REPO_NODE_ID="${REPO_NODE_ID:-R_kgDOS3Iezw}" AUTH_SHA="${AUTH_SHA:-$sha}" AUTH_REF_EXISTS="${AUTH_REF_EXISTS:-1}" \
-    GITHUB_REPOSITORY="${FIXTURE_REPOSITORY:-jarimustonen/taskfleet}" \
+    GITHUB_REPOSITORY="${FIXTURE_REPOSITORY:-Open-Habitat/taskfleet}" \
     GITHUB_REF="${FIXTURE_REF:-refs/tags/v0.6.0}" GITHUB_REF_TYPE="${FIXTURE_REF_TYPE:-tag}" \
     GITHUB_REF_NAME="${FIXTURE_REF_NAME:-v0.6.0}" GITHUB_SHA="${FIXTURE_SHA:-$sha}" \
     scripts/verify-release-tag-authorization.sh)

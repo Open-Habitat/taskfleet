@@ -63,7 +63,7 @@ validate_contract_targets() {
       adapter: "cargo-dist",
       gh_releases: true,
       installers: ["shell", "homebrew"],
-      homebrew_tap: "jarimustonen/homebrew-taskfleet",
+      homebrew_tap: "Open-Habitat/homebrew-taskfleet",
       platforms: [
         "aarch64-apple-darwin",
         "aarch64-unknown-linux-gnu",

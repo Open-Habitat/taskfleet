@@ -434,7 +434,7 @@ first invocation in a session, run
   outside this repository workflow, then stop.
 - **Older**: tell the user the skill expects `{{CLI_VERSION}}` and suggest
   upgrading via the channel they originally used
-  (`brew upgrade jarimustonen/taskfleet/taskfleet` or the shell installer),
+  (`brew upgrade open-habitat/taskfleet/taskfleet` or the shell installer),
   then stop; the `run create --kind technical-decision` surface may have
   changed.
 - **Newer**: tell the user the installed skill is stale and stop. Refreshing

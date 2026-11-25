@@ -101,7 +101,7 @@ set -euo pipefail
 printf '%s\n' "$*" >>"$GIT_STUB_LOG"
 case "$*" in
   "remote get-url origin"|"remote get-url --push --all origin")
-    printf '%s\n' 'git@github.com:jarimustonen/taskfleet.git'
+    printf '%s\n' 'git@github.com:Open-Habitat/taskfleet.git'
     ;;
   "push origin refs/tags/v"*)
     printf '%s\n' "$*" >>"$TAG_PUSH_LOG"
@@ -137,7 +137,7 @@ case "$*" in
     # The fixture's real remote is a local bare repo. Only the recorded
     # coordinate is normalized so the production wrapper can inspect it.
     [[ "$(sed -n '1p' "$marker")" == origin && "$(sed -n '2p' "$marker")" == "$FIXTURE_ORIGIN" ]] || exit 97
-    sed '2c\git@github.com:jarimustonen/taskfleet.git' "$marker" >"$marker.normalized"
+    sed '2c\git@github.com:Open-Habitat/taskfleet.git' "$marker" >"$marker.normalized"
     mv "$marker.normalized" "$marker"
     exit 1
     ;;
@@ -169,8 +169,8 @@ if [[ "$*" == '--version' ]]; then
   printf '%s\n' 'gh version 2.79.0 (fixture)'
   exit 0
 fi
-if [[ "$*" == 'repo view jarimustonen/taskfleet --json nameWithOwner -q .nameWithOwner' ]]; then
-  printf '%s\n' jarimustonen/taskfleet
+if [[ "$*" == 'repo view Open-Habitat/taskfleet --json nameWithOwner -q .nameWithOwner' ]]; then
+  printf '%s\n' Open-Habitat/taskfleet
   exit 0
 fi
 if [[ "$*" == run\ list* ]]; then
@@ -208,10 +208,10 @@ git -C "$tmp/repo" config user.name protocol-test
 git -C "$tmp/repo" config user.email protocol-test@example.invalid
 # Canonical activation is simulated only inside the disposable fixture; no
 # public tag or registry is reachable.
-jq '.activation = "ready" | .repository = "jarimustonen/taskfleet"' \
+jq '.activation = "ready" | .repository = "Open-Habitat/taskfleet"' \
   "$tmp/repo/release/taskfleet-release.json" >"$tmp/topology.json"
 mv "$tmp/topology.json" "$tmp/repo/release/taskfleet-release.json"
-jq '.activation = "ready" | .source_repository.current = "jarimustonen/taskfleet" |
+jq '.activation = "ready" | .source_repository.current = "Open-Habitat/taskfleet" |
   .cargo_dist.trigger = "tag-push" | .cargo_dist.pr_run_mode = "skip" |
   .cargo_dist.tap_secret_state = "active-proven-r10" |
   .cargo_dist.activation_gate = "scripts/verify-release-tag-authorization.sh" |
@@ -245,7 +245,7 @@ chmod +x "$tmp/repo/scripts/validate-local-release.sh"
 # recursion when the wrapper's production cut invokes this test before tag push.
 printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/repo/scripts/test-shipshape-release-current-protocol.sh"
 chmod +x "$tmp/repo/scripts/test-shipshape-release-current-protocol.sh"
-grep -F 'https://github.com/jarimustonen/taskfleet' "$tmp/repo/Cargo.toml" >/dev/null
+grep -F 'https://github.com/Open-Habitat/taskfleet' "$tmp/repo/Cargo.toml" >/dev/null
 git -C "$tmp/repo" add release/taskfleet-release.json release/taskfleet-distribution.json \
   dist-workspace.toml Cargo.toml CHANGELOG.md .github/workflows/release.yml \
   scripts/validate-local-release.sh scripts/test-shipshape-release-current-protocol.sh

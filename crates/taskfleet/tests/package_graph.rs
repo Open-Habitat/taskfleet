@@ -11,7 +11,7 @@ fn release_topology_has_canonical_ordered_and_independent_legs() {
     .expect("release topology JSON");
     assert_eq!(topology["schema_version"], 1);
     assert_eq!(topology["activation"], "ready");
-    assert_eq!(topology["repository"], "jarimustonen/taskfleet");
+    assert_eq!(topology["repository"], "Open-Habitat/taskfleet");
     assert_eq!(topology["owners"], serde_json::json!(["jarimustonen"]));
     assert_eq!(
         topology["crates_io"]["legs"],

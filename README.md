@@ -74,11 +74,11 @@ cargo install taskfleet
 ```
 
 The source repository is
-[`jarimustonen/taskfleet`](https://github.com/jarimustonen/taskfleet). Homebrew
+[`Open-Habitat/taskfleet`](https://github.com/Open-Habitat/taskfleet). Homebrew
 installs the same command:
 
 ```bash
-brew install jarimustonen/taskfleet/taskfleet
+brew install open-habitat/taskfleet/taskfleet
 ```
 
 ## Quick start

@@ -7,20 +7,20 @@ cd "$repo_root"
 ./scripts/validate-release-topology.sh >/dev/null
 jq -e '
   .activation == "ready" and
-  .repository == "jarimustonen/taskfleet"
+  .repository == "Open-Habitat/taskfleet"
 ' release/taskfleet-release.json >/dev/null || {
   echo "release activation requires ready canonical Taskfleet repository topology" >&2
   exit 2
 }
 jq -e '
   .activation == "ready" and
-  .source_repository.current == "jarimustonen/taskfleet" and
+  .source_repository.current == "Open-Habitat/taskfleet" and
   .cargo_dist.trigger == "tag-push" and
   .cargo_dist.pr_run_mode == "skip" and
   .cargo_dist.authorization == "wrapper-ref-exact-tag-main-local-validation" and
   .cargo_dist.release_tag_ruleset == 22234415 and
   .cargo_dist.authorization_ref_ruleset == 22234417 and
-  .cargo_dist.tap == "jarimustonen/homebrew-taskfleet" and
+  .cargo_dist.tap == "Open-Habitat/homebrew-taskfleet" and
   .cargo_dist.tap_secret_state == "active-proven-r10"
 ' release/taskfleet-distribution.json >/dev/null || {
   echo "release activation requires completed R8/R9 distribution topology" >&2
@@ -53,8 +53,8 @@ grep -A12 '^on:' .github/workflows/release.yml |
 }
 cargo metadata --locked --no-deps --format-version=1 | jq -e '
   [.packages[] | select(.name == "taskfleet-core" or .name == "taskfleet") |
-    (.repository == "https://github.com/jarimustonen/taskfleet" and
-     .homepage == "https://github.com/jarimustonen/taskfleet")] | length == 2 and all
+    (.repository == "https://github.com/Open-Habitat/taskfleet" and
+     .homepage == "https://github.com/Open-Habitat/taskfleet")] | length == 2 and all
 ' >/dev/null || {
   echo "release activation requires canonical Cargo repository/homepage metadata" >&2
   exit 2

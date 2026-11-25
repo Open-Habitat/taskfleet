@@ -249,7 +249,7 @@ installed binary differs from `{{CLI_VERSION}}` (read `.data.version` from
 `taskfleet version --json`), a flag or field described here may not exist, and
 the help text of the installed binary outranks this document. Tell the user
 about the mismatch; the remedy is upgrading the binary through the channel
-they installed it from (`brew upgrade jarimustonen/taskfleet/taskfleet` or the
+they installed it from (`brew upgrade open-habitat/taskfleet/taskfleet` or the
 shell installer) or refreshing the installed skills, and both are the user's
 tool maintenance rather than something to do silently inside another task. A
 missing binary is the same: say so and let the user install it. Inside the

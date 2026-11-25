@@ -2,7 +2,7 @@
 # Verify the live rules that prevent ordinary writers/workflows from creating
 # release tags or forging/moving wrapper authorization receipts.
 set -euo pipefail
-repo="jarimustonen/taskfleet"
+repo="Open-Habitat/taskfleet"
 
 check_ruleset() {
   local id="$1" name="$2" target="$3" ref_pattern="$4" json api_error http_status

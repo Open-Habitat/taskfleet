@@ -8,7 +8,7 @@
     "trigger": "tag-push",
     "pr_run_mode": "skip",
     "apps": ["taskfleet"],
-    "tap": "jarimustonen/homebrew-taskfleet",
+    "tap": "Open-Habitat/homebrew-taskfleet",
     "tap_secret": "HOMEBREW_TAP_TOKEN",
     "tap_secret_state": "active-proven-r10",
     "activation_gate": "scripts/verify-release-tag-authorization.sh",
@@ -18,7 +18,7 @@
     "macos_runner": "macOS"
   },
   "source_repository": {
-    "current": "jarimustonen/taskfleet"
+    "current": "Open-Habitat/taskfleet"
   },
   "public_receipts": {
     "repository_id": 1355125556,

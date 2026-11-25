@@ -13,7 +13,7 @@ readonly tar_bin="${TAR_BIN:-tar}"
 readonly sha256_bin="${SHA256_BIN:-sha256sum}"
 readonly sleep_bin="${SLEEP_BIN:-sleep}"
 readonly registry="${CRATES_IO_API:-https://crates.io/api/v1}"
-readonly user_agent="taskfleet-release-reconciler/1 (+https://github.com/jarimustonen/taskfleet)"
+readonly user_agent="taskfleet-release-reconciler/1 (+https://github.com/Open-Habitat/taskfleet)"
 publish_token="${CARGO_REGISTRY_TOKEN:-}"
 unset CARGO_REGISTRY_TOKEN
 

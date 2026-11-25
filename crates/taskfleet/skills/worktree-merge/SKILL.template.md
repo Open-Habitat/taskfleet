@@ -261,7 +261,7 @@ the JSON, and read `.data.version`. Compare it to `{{CLI_VERSION}}`:
 
 - **Older than `{{CLI_VERSION}}`**: tell the user the skill expects
   `{{CLI_VERSION}}` and suggest upgrading via the same channel they
-  originally used (`brew upgrade jarimustonen/taskfleet/taskfleet` or
+  originally used (`brew upgrade open-habitat/taskfleet/taskfleet` or
   re-run the shell installer).
   Stop and wait — the `run merge` flag surface may have changed.
 - **Newer than `{{CLI_VERSION}}`**: tell the user the installed skill is

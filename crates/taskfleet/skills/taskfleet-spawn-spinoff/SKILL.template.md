@@ -432,7 +432,7 @@ fields may have moved, and the installed binary's `--help` outranks this
 document; tell the user about the mismatch and stop rather than guess. The
 remedy is the user's tool maintenance, not something to do silently inside
 another task: an older binary is upgraded through the channel it was installed
-from (`brew upgrade jarimustonen/taskfleet/taskfleet` or the shell installer),
+from (`brew upgrade open-habitat/taskfleet/taskfleet` or the shell installer),
 a newer binary means the installed skills are stale and need refreshing, and a
 missing binary is installed through a published distribution channel. Inside
 the taskfleet repository itself, never touch the installed binary or skills;
