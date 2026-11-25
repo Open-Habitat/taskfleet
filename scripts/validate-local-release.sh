@@ -64,6 +64,8 @@ run cargo deny --locked check
 
 run ./scripts/check-version-snapshots.sh
 run ./scripts/check-canonical-identity.sh
+run python3 ./scripts/validate-project-view.py
+run ./scripts/test-project-view.sh
 if find crates/taskfleet/tests/snapshots -name '*.snap.new' -print -quit | grep -q .; then
   echo "unreviewed insta snapshot changes remain (*.snap.new)" >&2
   exit 2
