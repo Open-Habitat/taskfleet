@@ -1,6 +1,6 @@
 ---
 created: 2026-10-16
-updated: 2026-10-25
+updated: 2026-11-25
 type: task
 reporter: jari
 status: done
@@ -9,12 +9,11 @@ provenance: chat
 source_ref: taskfleet:01m51nrfvbqwsybz0gdggz6q4b/request:terminal-run-retention
 originating_run: 01m51nrfvbqwsybz0gdggz6q4b
 originating_run_kind: spinoff
-related: ['@agent-session-retention', '@done-run-retains-worktree', '@durable-worker-evidence']
+closed_by: pi
 lane: open-habitat
 lane_seq: 40
 collision: [supervise-cleanup, run-public-contract]
 closed: 2026-10-16
-closed_by: pi
 ---
 
 # Guarantee terminal run history survives teardown

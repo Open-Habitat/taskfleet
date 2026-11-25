@@ -1,6 +1,6 @@
 ---
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-11-25
 type: feature
 reporter: jari
 status: done
@@ -9,12 +9,11 @@ provenance: chat
 source_ref: taskfleet:01m51nrfvbqwsybz0gdggz6q4b/request:transcript-paths
 originating_run: 01m51nrfvbqwsybz0gdggz6q4b
 originating_run_kind: spinoff
-related: ['@durable-worker-evidence']
+closed_by: pi
 lane: open-habitat
 lane_seq: 30
 collision: [supervise-cleanup, run-public-contract]
 closed: 2026-10-16
-closed_by: pi
 ---
 
 # Expose live and evidence transcript paths for run readers
