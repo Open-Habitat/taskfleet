@@ -13,6 +13,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The repository and the Homebrew tap moved to the Open-Habitat GitHub organisation: the source is `https://github.com/Open-Habitat/taskfleet` and the install is `brew install Open-Habitat/taskfleet/taskfleet`. The old repository and tap URLs redirect. Closed issues and implemented design records (ADRs, rollout notes) are no longer kept in the tree; they live in git history, reached through commit `Refs-Issue`/`Fixes-Issue` trailers and `scripts/from-history.sh <path>`.
+
 - Timestamps are handled with `jiff` instead of the now-unmaintained `chrono` (RUSTSEC-2026-0543), and human durations (`run wait --timeout`, `--poll-interval`, `--check-in`, `tmux.completed_window_ttl`) are parsed by a small local parser instead of the unmaintained `humantime` (RUSTSEC-2026-0542), accepting the same units including days and weeks (`cargo-deny-advisories-2026-11`). Stored and JSON timestamps stay RFC 3339 UTC and existing run state reads unchanged; fractional seconds are now printed with the fewest digits needed, and text-mode output and `event tail` print the RFC 3339 `…Z` form instead of `YYYY-MM-DD HH:MM:SS UTC` / `+00:00`. `taskfleet-core`'s public timestamp fields are now `jiff::Timestamp`.
 
 - Replace unmaintained `chrono` and `humantime` dependencies (`cargo-deny-advisories-2026-11`).
