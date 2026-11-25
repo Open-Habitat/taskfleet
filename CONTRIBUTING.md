@@ -9,28 +9,35 @@ read this file before opening either.
 - Run `taskfleet version` and `taskfleet doctor` and include
   the output. `doctor` reports `63 ok / 0 fail` on a clean install — any
   non-zero `fail` count is worth surfacing.
-- Check `TODO.md` — the active pre-publication campaign is tracked there
-  and many known gaps already have an issue under `issues/<slug>/`.
-- For workflow questions ("how do I do X with `/worktree-*`"), open a
-  GitHub Discussion instead of an issue.
+- Report bugs and feature requests as GitHub Issues. For workflow questions
+  ("how do I do X with `/worktree-*`"), open a GitHub Discussion instead.
+- Search the open GitHub Issues and the accepted work under
+  `issues/<slug>/` first; a known gap may already be tracked.
 
 ## Before you open a pull request
 
-- The repo uses [`issuectl`](https://github.com/jarimustonen/issuectl) to
-  track every non-trivial change. For anything more than a typo fix,
-  please file an issue first (or reference an existing one) so the
-  decision conversation has a home.
+- For anything more than a typo fix, open a GitHub Issue or Discussion
+  first (or reference an existing one) so the decision conversation has a
+  home. Maintainers accept work into the repository's
+  [`issuectl`](https://github.com/jarimustonen/issuectl) tracker under
+  `issues/`, filed with the report's URL as its source, and commits carry a
+  `Refs-Issue:` or `Fixes-Issue:` trailer naming that issue.
 - All code must pass:
   ```bash
   cargo fmt --check
   cargo clippy --all-targets -- -D warnings
   cargo test --workspace
-  cargo doc --workspace --no-deps           # warnings are errors in CI
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
   ```
+  There is no hosted CI. Maintainers run the complete gate,
+  `scripts/validate-local-release.sh`, on the exact commit before it lands.
+- Use synthetic hosts, people, home paths and accounts in everything you
+  write for the project (issues, commit messages, fixtures, branch names),
+  never those of a real installation.
 - New commands or flags must follow the AI-first conventions documented
   in `/ai-first-cli-canon` — `--json` output,
   JSONL logs, strict input validation, informative error envelopes, no
-  interactive prompts. New SKILL.md examples are CI-gated against the
+  interactive prompts. New SKILL.md examples are test-gated against the
   actual binary CLI surface.
 - Keep commits focused. One concern per commit; one issue per PR.
 
@@ -44,8 +51,10 @@ read this file before opening either.
   repository-local build and explicit `./target/release/taskfleet …`
   invocations. For `SKILL.template.md` edits, run and review the insta snapshot
   loop documented in `crates/taskfleet/AGENTS.md`; no install is needed.
-- `issues/<slug>/item.md` — every issue + epic (flat layout, no
-  numeric prefix, status in frontmatter).
+- `issues/<slug>/item.md` — accepted open work (flat layout, status in
+  frontmatter). A closed issue or an implemented decision record is
+  removed from the tree once the code carries it; read it with
+  `scripts/from-history.sh <path>` or `git log --all -- <path>`.
 - `/ai-first-cli-canon` — externally maintained CLI design canon; treat the
   installed skill as canonical, not a project-local copy.
 

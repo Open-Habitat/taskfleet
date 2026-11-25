@@ -30,5 +30,4 @@ tab and credited to the reporter unless anonymity was requested.
   (`git`, `tmux`, `workmux`, Claude Code itself). Report those upstream.
 - Local-only attacks that require shell access to the running user
   account: `taskfleet` runs unprivileged and trusts the local
-  filesystem under its resolved home (`~/.taskfleet/` by default). Read its [threat model in
-  AGENTS-AI-FIRST-CLI.md](AGENTS-AI-FIRST-CLI.md) before reporting.
+  filesystem under its resolved home (`~/.taskfleet/` by default).

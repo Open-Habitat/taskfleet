@@ -7,23 +7,24 @@ Keep PRs focused — one concern per commit, one issue per PR.
 
 <!-- What does this change and why? Link the issue it addresses. -->
 
-Closes: <!-- issues/<slug> or #<gh-issue>, or "n/a (typo fix)" -->
+Closes: <!-- #<gh-issue>, or "n/a (typo fix)" -->
 
 ## Green gate
 
-All must pass locally before review (CI enforces them):
+All must pass locally before review; there is no hosted CI, and maintainers
+run the complete gate (`scripts/validate-local-release.sh`) before merging:
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo clippy --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
-- [ ] `cargo doc --workspace --no-deps` (warnings are errors in CI)
+- [ ] `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`
 
 ## Checklist
 
-- [ ] Filed or referenced an `issuectl` issue for anything beyond a typo fix
+- [ ] Linked the GitHub issue or discussion for anything beyond a typo fix
       (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
-- [ ] New commands/flags follow the AI-first conventions in
-      [`AGENTS-AI-FIRST-CLI.md`](../AGENTS-AI-FIRST-CLI.md) — `--json` output,
+- [ ] New commands/flags follow the AI-first CLI canon (the
+      `/ai-first-cli-canon` skill) — `--json` output,
       JSONL logs, strict input validation, informative error envelopes, no
       interactive prompts.
 - [ ] CLI-surface or `SKILL.template.md` changes: validated with repository-local
