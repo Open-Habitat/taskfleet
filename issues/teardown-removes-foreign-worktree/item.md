@@ -2,11 +2,13 @@
 created: 2026-11-13
 updated: 2026-11-26
 type: bug
-status: in-progress
+status: fixed
 priority: normal
 provenance: chat
 source_ref: conductor:2026-11-13/open-habitat-gate-worktree
 lane: worktree-lifecycle
+closed: 2026-11-26
+closed_by: agent:taskfleet-worker
 ---
 
 # Spinoff teardown removed a foreign worktree's registration (.git/worktrees deleted)
