@@ -2,7 +2,7 @@
 created: 2026-10-25
 updated: 2026-11-26
 type: bug
-status: in-progress
+status: fixed
 priority: normal
 provenance: ai-review
 source_ref: taskfleet:01m5t7sh2k42k77drb89tcsgx0/review-finding:tmux-server-identity-seconds
@@ -18,6 +18,8 @@ review_confidence: high
 review_severity: should-fix
 review_target: 7026d09f
 lane: display
+closed: 2026-11-26
+closed_by: agent:taskfleet-worker
 ---
 
 # Retention reads a live tmux server as gone after a wall-clock step
