@@ -716,9 +716,9 @@ pub(crate) fn cleanup_node(paths: &RunPaths, n: &Node, tmux: &str, git: &str) {
     {
         return;
     }
-    // Final evidence is a prerequisite, not a best-effort diagnostic. Capture
-    // while the exact recorded pane and native transcript still exist; any
-    // failure is durable and preserves all cleanup inputs for a later retry.
+    // Archive the native transcript before cleanup. An unavailable pane is a
+    // durable diagnostic, not a veto; transcript/archive failures still preserve
+    // cleanup inputs for retry. Git preservation policy remains authoritative.
     if !crate::supervise::evidence::archive_before_cleanup(paths, n, tmux) {
         return;
     }
@@ -2771,6 +2771,125 @@ mod tests {
             events_of_kind(&paths, "cleanup.branch_preserved"),
             Vec::<serde_json::Value>::new()
         );
+    }
+
+    #[test]
+    fn missing_pane_after_merge_does_not_block_teardown() {
+        missing_pane_cleanup_case(true, false);
+    }
+
+    #[test]
+    fn missing_pane_with_unmerged_work_is_preserved_without_recapture() {
+        missing_pane_cleanup_case(false, false);
+    }
+
+    #[test]
+    fn missing_pane_with_dirty_work_is_preserved_without_recapture() {
+        missing_pane_cleanup_case(false, true);
+    }
+
+    fn missing_pane_cleanup_case(merged: bool, dirty: bool) {
+        let tmp = TempDir::new().unwrap();
+        let run_id = "01jxsnap000000000000000000";
+        let root = tmp.path().join("runs").join(run_id);
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = RunPaths::new(root, run_id).unwrap();
+        let (repo, wt) = init_repo_with_worktree(&tmp);
+        bootstrap_source_main(&paths, &repo);
+        if dirty {
+            std::fs::write(wt.join("scratch.rs"), "unfinished").unwrap();
+        } else {
+            commit_in_worktree(&wt, "feat.rs", "worker change");
+        }
+        if merged {
+            git(&repo, &["merge", "--ff-only", "wt/foo"]);
+            assert_eq!(commits_ahead(&repo, "main", "wt/foo"), 0);
+        }
+        let session_id = "018f5f64-b137-7d44-b2b4-4f02c3f646e8";
+        let live_relative = format!(".creating/pi-sessions/{run_id}/pi-session-{session_id}.jsonl");
+        let live = tmp.path().join(&live_relative);
+        std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+        let original = format!(
+            "{}\n",
+            json!({"type":"session", "version":3,
+            "id":session_id, "cwd":wt})
+        );
+        std::fs::write(&live, &original).unwrap();
+        forge_node(
+            &paths,
+            "n-0001",
+            json!({
+                "worktree_path":wt, "branch":"wt/foo", "tmux_session":"private",
+                "tmux_window_id":"@7", "tmux_pane_id":"%9",
+                "pi_session_id":session_id, "pi_session_path":live_relative,
+                "pi_session_cwd":wt, "attempt":0
+            }),
+        );
+        append_and_apply_event(
+            &paths,
+            "worker.exited",
+            Some(&nid("n-0001")),
+            None,
+            json!({"exit_code":0}),
+        )
+        .unwrap();
+        report(
+            &paths,
+            "n-0001",
+            if merged {
+                json!({"success":true, "via":"explicit-merge"})
+            } else if dirty {
+                json!({"success":true})
+            } else {
+                json!({"success":false})
+            },
+        );
+        std::fs::write(paths.agent_log(), "existing agent log").unwrap();
+        let tmux = fake_tmux(
+            tmp.path(),
+            "case \" $* \" in *' capture-pane '*) echo \"can't find pane: %9\" >&2; exit 1;; esac",
+        );
+        for _ in 0..2 {
+            let node = read_node_opt(&paths, &nid("n-0001")).unwrap().unwrap();
+            cleanup_node(&paths, &node, &tmux, &git_bin());
+        }
+        let node = read_node_opt(&paths, &nid("n-0001")).unwrap().unwrap();
+        let evidence = node.evidence.unwrap();
+        assert_eq!(evidence.status, taskfleet_core::EvidenceStatus::Complete);
+        assert_eq!(
+            std::fs::read_to_string(paths.root.join(evidence.transcript_path.unwrap())).unwrap(),
+            original
+        );
+        let pane = std::fs::read_to_string(paths.root.join(evidence.pane_path.unwrap())).unwrap();
+        assert!(pane.contains("can't find pane"), "{pane}");
+        assert!(paths.root.join(evidence.report_path.unwrap()).exists());
+        assert!(!live.exists());
+        assert_eq!(
+            std::fs::read_to_string(paths.agent_log()).unwrap(),
+            "existing agent log"
+        );
+        assert_eq!(events_of_kind(&paths, "worker.evidence.failed").len(), 1);
+        assert_eq!(events_of_kind(&paths, "worker.evidence.archived").len(), 1);
+        assert_eq!(
+            tmux_log(tmp.path())
+                .lines()
+                .filter(|s| s.contains("capture-pane"))
+                .count(),
+            1
+        );
+        assert_eq!(wt.exists(), !merged);
+        assert_eq!(branch_exists(&repo, "wt/foo"), !merged);
+        if !merged {
+            assert_eq!(events_of_kind(&paths, "cleanup.branch_preserved").len(), 1);
+            if dirty {
+                assert_eq!(
+                    std::fs::read_to_string(wt.join("scratch.rs")).unwrap(),
+                    "unfinished"
+                );
+            } else {
+                assert_eq!(commits_ahead(&repo, "main", "wt/foo"), 1);
+            }
+        }
     }
 
     /// The durable agent-pane capture (`<run-dir>/agent.log`, issue

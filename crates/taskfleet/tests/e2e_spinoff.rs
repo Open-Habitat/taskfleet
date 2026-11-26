@@ -67,25 +67,40 @@ fn wait_event_count(path: &Path, kind: &str, wanted: usize) {
 
 #[test]
 fn native_spinoff_round_trip_reaches_done_and_tears_down() {
-    terminal_history_round_trip(false, "done");
+    terminal_history_round_trip(false, "done", false);
 }
 
 #[test]
 fn interactive_merge_retains_history_after_teardown_and_restart() {
-    terminal_history_round_trip(true, "done");
+    terminal_history_round_trip(true, "done", false);
 }
 
 #[test]
 fn cancelled_work_retains_history_after_teardown_and_restart() {
-    terminal_history_round_trip(false, "cancelled");
+    terminal_history_round_trip(false, "cancelled", false);
 }
 
 #[test]
 fn failed_work_retains_history_after_teardown_and_restart() {
-    terminal_history_round_trip(false, "failed");
+    terminal_history_round_trip(false, "failed", false);
 }
 
-fn terminal_history_round_trip(interactive: bool, status: &str) {
+#[test]
+fn missing_pane_merged_run_exits_and_tears_down() {
+    terminal_history_round_trip(false, "done", true);
+}
+
+#[test]
+fn missing_pane_failed_run_exits_and_preserves_work() {
+    terminal_history_round_trip(false, "failed", true);
+}
+
+#[test]
+fn missing_pane_cancelled_run_exits_and_preserves_work() {
+    terminal_history_round_trip(false, "cancelled", true);
+}
+
+fn terminal_history_round_trip(interactive: bool, status: &str, missing_pane: bool) {
     let home = TestHome::new();
     let scratch = TempDir::new().unwrap();
     let tools = NativeSpawnTools::new();
@@ -120,6 +135,9 @@ default="e2e"
         .env("TASKFLEET_HOME", home.path())
         .env("HOME", home.path());
     tools.configure(&mut create, &worktree, "headless");
+    if missing_pane {
+        create.env("NATIVE_TEST_CAPTURE_PANE_MISSING", "1");
+    }
     create.env(
         "TASKFLEET_CREATOR_SESSION",
         "pi:018f5f64-b137-7d44-b2b4-4f02c3f646e8",
@@ -252,6 +270,25 @@ default="e2e"
         serde_json::from_slice(&std::fs::read(run_dir.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest["status"], status);
     assert_eq!(worktree.exists(), status != "done");
+    if missing_pane {
+        let dir = run_dir.join("evidence/n-0001");
+        assert!(std::fs::read_to_string(dir.join("final-pane.log"))
+            .unwrap()
+            .contains("can't find pane"));
+        assert!(dir.join("pi-session.original.jsonl").exists());
+        assert!(dir.join("terminal-report.json").exists());
+        let stream = std::fs::read_to_string(&events).unwrap();
+        assert_eq!(
+            stream
+                .lines()
+                .filter(|line| serde_json::from_str::<Value>(line).unwrap()["kind"]
+                    == "worker.evidence.failed")
+                .count(),
+            1
+        );
+        let branch = git(tools.repo_path(), &["branch", "--list", "wt/*"]);
+        assert_eq!(branch.is_empty(), status == "done");
+    }
     let before = assert_terminal_history(home.path(), run_id, status, interactive);
     // Re-enter the actual supervisor against durable terminal state. No worker
     // is launched and no ambient manager/server is consulted.

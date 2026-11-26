@@ -1,9 +1,9 @@
 //! Final durable evidence capture for native Pi and headless Claude workers.
 //!
-//! Capture runs before terminal pane/worktree cleanup. A failed capture is a
-//! durable `worker.evidence.failed` fact and vetoes cleanup, preserving the live
-//! sources for a supervisor retry. Success is a single locked
-//! `worker.evidence.archived` transition on the node projection.
+//! Capture runs before terminal pane/worktree cleanup. Transcript/archive errors
+//! preserve live sources for retry. Pane capture is bounded and best-effort: an
+//! unavailable pane is recorded durably instead of vetoing cleanup forever.
+//! Success is a single locked `worker.evidence.archived` transition.
 
 use std::collections::HashMap;
 use std::io::{Read as _, Write as _};
@@ -152,7 +152,7 @@ fn archive_claude(paths: &RunPaths, node: &Node, tmux: &str) -> bool {
             .last_report
             .as_ref()
             .ok_or("terminal node has no report")?;
-        let pane = pane_history(paths, node, identity, tmux)?;
+        let pane = archive_pane_history(paths, node, identity, tmux)?;
         let root = paths.root.join("evidence");
         ensure_private_directory(&root)?;
         ensure_private_directory(&dir)?;
@@ -290,7 +290,7 @@ fn capture(paths: &RunPaths, node: &Node, tmux: &str) -> Result<Value, String> {
         .tmux_identity
         .as_ref()
         .ok_or("terminal worker has no qualified tmux identity")?;
-    let pane = pane_history(paths, node, identity, tmux)?;
+    let pane = archive_pane_history(paths, node, identity, tmux)?;
 
     // Prove the native writer did not move while pane/report capture ran.
     let after_capture = regular_metadata(&live)?;
@@ -367,6 +367,57 @@ fn capture_pane(identity: &taskfleet_core::TmuxIdentity, tmux: &str) -> Result<V
             Err(format!("tmux capture-pane spawn failed: {error}"))
         }
     }
+}
+
+/// A vanished pane cannot be recovered by waiting. Cache its failure per worker
+/// attempt, so even an unrelated archive error or supervisor restart cannot
+/// turn it into an endless capture retry. This supplies diagnostic bytes only;
+/// it grants no merge or Git cleanup authority.
+fn archive_pane_history(
+    paths: &RunPaths,
+    node: &Node,
+    identity: &taskfleet_core::TmuxIdentity,
+    tmux: &str,
+) -> Result<Vec<u8>, String> {
+    let root = paths.root.join("evidence");
+    ensure_private_directory(&root)?;
+    let dir = root.join(node.node_id.as_str());
+    ensure_private_directory(&dir)?;
+    let unavailable = dir.join(format!("pane-unavailable-{}.log", node.retry_attempts));
+    let detail = match std::fs::read_to_string(&unavailable) {
+        Ok(detail) => detail,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match pane_history(paths, node, identity, tmux) {
+                Ok(pane) => return Ok(pane),
+                Err(error) => {
+                    let detail = format!("final pane unavailable: {error}\n");
+                    write_atomic(&unavailable, detail.as_bytes())?;
+                    detail
+                }
+            }
+        }
+        Err(error) => return Err(format!("read pane failure marker: {error}")),
+    };
+    let (kind, data) = match node.evidence.as_ref() {
+        Some(recorded) => (
+            "worker.evidence.failed",
+            json!({"attempt": recorded.attempt, "session_id": recorded.session_id,
+                "component": "pane", "error": detail}),
+        ),
+        // Claude has no Pi evidence projection; retain the same diagnostic as
+        // a log-only fact, alongside its headless archive marker.
+        None => (
+            "worker.pane_capture.failed",
+            json!({"attempt": node.retry_attempts, "error": detail}),
+        ),
+    };
+    let key = format!(
+        "worker-pane-failed:{}:{}",
+        node.node_id, node.retry_attempts
+    );
+    append_and_apply_event(paths, kind, Some(&node.node_id), Some(&key), data)
+        .map_err(|error| error.to_string())?;
+    Ok(detail.into_bytes())
 }
 
 const DORMANT_PANE: &str = "dormant-pane.log";
@@ -788,8 +839,13 @@ mod tests {
     fn failed_capture_is_durable_and_a_later_retry_can_complete() {
         let tmp = TempDir::new().unwrap();
         let (paths, node_id, _) = setup(&tmp);
-        let failing = tmux_script(&tmp, "echo unavailable >&2; exit 1");
+        let failing = tmux_script(&tmp, "printf pane");
         let node = read_node(&paths, &node_id).unwrap();
+        let live = tmp
+            .path()
+            .join(&node.evidence.as_ref().unwrap().live_session_path);
+        let original = std::fs::read(&live).unwrap();
+        std::fs::write(&live, b"invalid header\n").unwrap();
         assert!(!archive_before_cleanup(&paths, &node, &failing));
         let failed = read_node(&paths, &node_id).unwrap();
         assert_eq!(
@@ -800,6 +856,7 @@ mod tests {
 
         // A restarted supervisor reads the durable failed projection and retries;
         // success is allowed to advance failed -> complete exactly once.
+        std::fs::write(&live, original).unwrap();
         let succeeding = tmux_script(&tmp, "printf recovered");
         assert!(archive_before_cleanup(&paths, &failed, &succeeding));
         assert_eq!(
@@ -810,6 +867,64 @@ mod tests {
                 .status,
             taskfleet_core::EvidenceStatus::Complete
         );
+    }
+
+    #[test]
+    fn unavailable_pane_is_not_recaptured_after_archive_retry() {
+        let tmp = TempDir::new().unwrap();
+        let (paths, node_id, _) = setup(&tmp);
+        let node = read_node(&paths, &node_id).unwrap();
+        let live = tmp
+            .path()
+            .join(&node.evidence.as_ref().unwrap().live_session_path);
+        let failing = tmux_script(&tmp, &format!(
+            "printf '{{\"type\":\"tick\"}}\\n' >> '{}'; echo \"can't find pane: %9\" >&2; exit 1", live.display()));
+        // The pane is gone AND the transcript changed during capture. Only the
+        // latter should require a retry; the former is durably final.
+        assert!(!archive_before_cleanup(&paths, &node, &failing));
+        let failed = read_node(&paths, &node_id).unwrap();
+        assert!(failed
+            .evidence
+            .as_ref()
+            .unwrap()
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("changed"));
+        let must_not_run = tmp.path().join("unexpected-capture");
+        let tmux = tmux_script(&tmp, &format!("touch '{}'; exit 1", must_not_run.display()));
+        assert!(archive_before_cleanup(&paths, &failed, &tmux));
+        assert!(!must_not_run.exists());
+        let archived = read_node(&paths, &node_id).unwrap();
+        let pane = paths
+            .root
+            .join(archived.evidence.unwrap().pane_path.unwrap());
+        assert!(std::fs::read_to_string(pane)
+            .unwrap()
+            .contains("can't find pane"));
+    }
+
+    #[test]
+    fn claude_missing_pane_archives_report_and_diagnostic_once() {
+        let tmp = TempDir::new().unwrap();
+        let (paths, node_id, _) = setup(&tmp);
+        let mut node = read_node(&paths, &node_id).unwrap();
+        node.evidence = None;
+        let failing = tmux_script(&tmp, "echo \"can't find pane: %9\" >&2; exit 1");
+        assert!(archive_claude(&paths, &node, &failing));
+        let must_not_run = tmp.path().join("unexpected-capture");
+        let tmux = tmux_script(&tmp, &format!("touch '{}'; exit 1", must_not_run.display()));
+        assert!(archive_claude(&paths, &node, &tmux));
+        assert!(!must_not_run.exists());
+        let dir = paths.root.join("evidence").join(node_id.as_str());
+        assert!(dir.join("terminal-report.json").exists());
+        assert!(dir.join("claude-headless.json").exists());
+        assert!(std::fs::read_to_string(dir.join("final-pane.log"))
+            .unwrap()
+            .contains("can't find pane"));
+        assert!(std::fs::read_to_string(paths.events())
+            .unwrap()
+            .contains("worker.pane_capture.failed"));
     }
 
     #[test]

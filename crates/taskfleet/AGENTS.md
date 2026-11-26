@@ -194,10 +194,12 @@ starts pi with
 selection flags is rejected rather than overridden, and why evidence can be
 exact instead of "the newest session file". On the terminal transition
 `supervise::evidence` archives the transcript, a resume copy, the final pane
-history, and the terminal report before any cleanup. A failed capture is a
-durable `worker.evidence.failed` fact that vetoes cleanup and retries with
-backoff, so a run that seems stuck at teardown is usually waiting on
-evidence, and the fix is to look at that event rather than to force cleanup.
+history, and the terminal report before any cleanup. Transcript or archive-write
+failures are durable `worker.evidence.failed` facts that veto cleanup and retry with backoff to protect the resumable source.
+Pane capture is bounded and best-effort: failures are cached per attempt and
+recorded durably, and the archive contains an unavailable-pane diagnostic so a
+vanished pane cannot block Git cleanup. These diagnostics grant no teardown
+authority; the existing outcome and Git preservation checks still decide it.
 The original transcript is never rewritten. A named resident round (ADR
 0003, `src/run/resume.rs`) is the one launch that reuses a session: its
 launcher reopens the recorded Pi transcript with `--session` (the handshake
