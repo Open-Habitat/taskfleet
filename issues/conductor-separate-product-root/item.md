@@ -2,7 +2,7 @@
 created: 2026-11-10
 updated: 2026-11-26
 type: feature
-status: open
+status: in-progress
 priority: normal
 provenance: other
 provenance_detail: Open Habitat ADR 0036 change list (Taskfleet / conductor skills row)
