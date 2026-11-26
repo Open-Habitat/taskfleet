@@ -2,7 +2,7 @@
 created: 2026-11-13
 updated: 2026-11-26
 type: bug
-status: open
+status: in-progress
 priority: normal
 provenance: chat
 source_ref: conductor:2026-11-13/open-habitat-gate-worktree
