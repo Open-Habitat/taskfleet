@@ -33,3 +33,50 @@ its own worktree.
 
 Teardown removes only its own worktree registration and its own config
 section; foreign worktrees and unrelated config stay untouched.
+
+## Triage analysis
+
+**Verdict: cannot tell, not caused by taskfleet's teardown by itself.** A
+specific plausible path with material impact remains. Examined taskfleet
+v0.20.0 and v0.21.0 (`7d1f83a9`; no relevant change between them) and workmux
+v0.1.284 (`748997d`). Full trace: `analysis.md` in this issue directory.
+
+- **What teardown does.** `supervise/cleanup.rs` runs only
+  `git worktree remove` on the node's own path and `git branch -d/-D` on its
+  own branch. It never calls workmux or `git worktree prune`. `branch -D`
+  rewrites `.git/config` by removing the branch's own section, including
+  workmux's `workmux-base` key. That is the config change that was seen, and
+  it happens on every landing.
+- **Why `.git/worktrees/` vanished.** Git `rmdir`s it only when it is empty,
+  after removing the last entry. So the foreign registration was already gone
+  when the teardown removed its own entry. Removing it takes a repo-wide
+  `git worktree prune` that could not see the foreign checkout: a process
+  with a different mount namespace or private `/var/tmp`, or a sandbox.
+  Candidate callers: workmux's remove/cleanup, which always prunes
+  repo-wide and deletes its `workmux.worktree.<handle>` section, matching
+  both symptoms; taskfleet reaches it only from spawn rollback
+  (`run/spawn.rs`, `run/create.rs`). Also taskfleet's resident resume
+  (`run/resume.rs`), and the gate itself.
+- **Responsible code.** Not taskfleet's teardown. The dangerous primitive is
+  the unscoped `git worktree prune` in workmux, and to a lesser degree in
+  taskfleet's resident resume, combined with an environment where callers
+  disagree about which paths exist.
+- **Severity: medium.** It breaks a concurrent, manually added worktree in
+  the same repository: the checkout's data survives, but the checkout must be
+  moved aside and re-added. It hits operators who mix their own worktrees
+  with taskfleet runs, and only when the pruning process cannot see the
+  foreign path.
+- **Repro status.** Partly reproduced in a disposable repository. The
+  teardown sequence alone leaves the foreign worktree intact. A prune run
+  while the foreign path was invisible, followed by the teardown, produces
+  exactly the reported end state.
+- **Fix sketch.** Taskfleet: replace the `workmux remove` calls in the spawn
+  rollback, and the prune in resident resume, with removal scoped to the
+  run's own worktree (its own admin dir and its own
+  `workmux.worktree.<handle>` section). Teardown should also remove that
+  section, which currently leaks. Workmux (upstream): scope cleanup's prune
+  to the quarantined worktree. Affected host: compare mount namespaces of the
+  conductor, the tmux server and the supervisor, and check whether the
+  spinoff's `workmux.worktree.<handle>` section survived. A gate that
+  requires a byte-identical shared config conflicts with any concurrent
+  landing by design.
