@@ -3,7 +3,7 @@ created: 2026-11-23
 updated: 2026-11-26
 type: bug
 reporter: jari
-status: open
+status: in-progress
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:salvage-midrebase-20261123
