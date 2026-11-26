@@ -18,6 +18,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at its original tip, and the `merge_failed` error (with `details.rebase`)
   says what happened and how to rebase and re-run the salvage. `run merge` for
   a live worker still leaves the conflict in the checkout for the worker.
+
+- A failed `run create`, a resident's worktree recreation, and teardown no longer touch other worktrees in the same repository (`teardown-removes-foreign-worktree`). Creation rollback used `workmux remove` and resident resume ran `git worktree prune`; both prune every registration in the repository, so a manually added worktree whose checkout that process could not see (another mount namespace or private `/var/tmp`) lost its `.git/worktrees/` entry. Taskfleet now closes only its own window, removes its own worktree by exact path, and removes only its own `workmux.worktree.<handle>` config section. Teardown also removes that section, which used to accumulate one per landed run.
 <!-- oss-changelog:unreleased-end -->
 
 ## [0.21.1] - 2026-11-26

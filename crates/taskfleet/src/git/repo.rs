@@ -478,6 +478,103 @@ impl Git {
         cmd.args(["branch", flag, "--", branch]);
         run_lenient_detail(cmd, &format!("git branch {flag} -- {branch}"))
     }
+
+    /// The registered worktree that has `branch` checked out, if Git lists
+    /// exactly one. Used by rollback paths that must find their own checkout
+    /// without asking a tool that would act on the whole repository.
+    pub fn worktree_for_branch(&self, repo: &str, branch: &str) -> Option<String> {
+        if branch.is_empty() {
+            return None;
+        }
+        let rows = self.worktree_registrations(repo)?;
+        let mut matches = rows
+            .into_iter()
+            .filter(|row| row.branch.as_deref() == Some(branch));
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first.path)
+    }
+
+    /// Remove workmux's `workmux.worktree.<handle>` config section for a
+    /// worktree that has just been removed, where `<handle>` is the checkout
+    /// directory's name (workmux's own handle rule).
+    ///
+    /// Workmux's own removal deletes this section only after a
+    /// repository-wide `git worktree prune`, which unregisters every worktree
+    /// whose checkout the pruning process cannot see, including foreign ones.
+    /// Taskfleet removes its own worktree by exact path instead and calls this
+    /// for the section, so nothing outside the run is touched. Fails closed:
+    /// the section stays when Git cannot list registrations or when any
+    /// still-registered worktree shares the handle (ours was not actually
+    /// removed, or a foreign checkout uses the same directory name).
+    ///
+    /// Returns `true` only when a section was found and removed.
+    pub fn workmux_meta_remove(&self, repo: &str, worktree_path: &str) -> bool {
+        let Some(handle) = std::path::Path::new(worktree_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+        else {
+            return false;
+        };
+        let Some(rows) = self.worktree_registrations(repo) else {
+            return false;
+        };
+        if rows.iter().any(|row| {
+            std::path::Path::new(&row.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some(handle)
+        }) {
+            return false;
+        }
+        let Ok(out) = self
+            .at(repo)
+            .args(["config", "--local", "--name-only", "--list"])
+            .stderr(Stdio::null())
+            .output()
+        else {
+            return false;
+        };
+        if !out.status.success() {
+            return false;
+        }
+        // Keys read `workmux.worktree.<handle>.<key>`; the subsection keeps its
+        // case and a key never contains a dot, so this is an exact match
+        // without building a regular expression from the handle.
+        let prefix = format!("workmux.worktree.{handle}.");
+        let present = String::from_utf8_lossy(&out.stdout).lines().any(|line| {
+            line.strip_prefix(&prefix)
+                .is_some_and(|key| !key.is_empty() && !key.contains('.'))
+        });
+        if !present {
+            return false;
+        }
+        let section = format!("workmux.worktree.{handle}");
+        let mut cmd = self.at(repo);
+        cmd.args(["config", "--local", "--remove-section", &section]);
+        run_lenient_detail(cmd, &format!("git config --remove-section {section}")).is_none()
+    }
+
+    /// Undo a worktree and branch that a failed `run create` materialized:
+    /// force-remove the checkout by its exact path (from `path_hint`, else
+    /// the registration holding `branch`), drop its own workmux section, then
+    /// force-delete the branch. The rollback never runs `git worktree prune`
+    /// or `workmux remove`: both act on every registration in the repository
+    /// and would unregister a foreign worktree whose checkout this process
+    /// cannot see.
+    pub fn rollback_own_worktree(&self, repo: &str, branch: &str, path_hint: Option<&str>) {
+        let path = path_hint
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+            .or_else(|| self.worktree_for_branch(repo, branch));
+        if let Some(path) = path.as_deref() {
+            let _ = self.worktree_remove(repo, path, true);
+            let _ = self.workmux_meta_remove(repo, path);
+        }
+        if !branch.is_empty() {
+            let _ = self.branch_delete(repo, branch, true);
+        }
+    }
 }
 
 /// Run a best-effort Git command, capturing failure detail without printing to
@@ -805,5 +902,69 @@ mod tests {
         assert!(g.worktree_remove(repo_s, wt.to_str().unwrap(), true));
         assert_eq!(g.branch_delete(repo_s, "wt/foo", false), None);
         assert!(!branch_exists(&repo, "wt/foo"));
+    }
+
+    fn local_config(repo: &std::path::Path) -> String {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["config", "--local", "--list"])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[test]
+    fn workmux_meta_remove_is_exact_and_fails_closed_while_handle_is_registered() {
+        let tmp = TempDir::new().unwrap();
+        let (repo, wt) = init_repo_with_worktree(&tmp);
+        let g = Git::with_bin("git");
+        let repo_s = repo.to_str().unwrap();
+        let wt_s = wt.to_str().unwrap();
+        git(&repo, &["config", "workmux.worktree.wt.mode", "window"]);
+        git(&repo, &["config", "workmux.worktree.wt.x.mode", "window"]);
+        git(&repo, &["config", "workmux.worktree.wt2.mode", "window"]);
+        assert!(!g.workmux_meta_remove(repo_s, wt_s), "still registered");
+        assert!(local_config(&repo).contains("workmux.worktree.wt.mode"));
+        git(&repo, &["worktree", "remove", "--force", wt_s]);
+        assert!(g.workmux_meta_remove(repo_s, wt_s));
+        let config = local_config(&repo);
+        assert!(!config.contains("workmux.worktree.wt.mode"), "{config}");
+        assert!(config.contains("workmux.worktree.wt.x.mode"), "{config}");
+        assert!(config.contains("workmux.worktree.wt2.mode"), "{config}");
+        assert!(!g.workmux_meta_remove(repo_s, wt_s), "already gone");
+    }
+
+    #[test]
+    fn rollback_own_worktree_spares_foreign_registration_with_invisible_checkout() {
+        let tmp = TempDir::new().unwrap();
+        let (repo, wt) = init_repo_with_worktree(&tmp);
+        let foreign = tmp.path().join("foreign-gate");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                foreign.to_str().unwrap(),
+            ],
+        );
+        git(&repo, &["config", "workmux.worktree.wt.mode", "window"]);
+        git(
+            &repo,
+            &["config", "workmux.worktree.foreign-gate.mode", "window"],
+        );
+        std::fs::rename(&foreign, tmp.path().join("hidden")).unwrap();
+        // No path hint: the rollback finds its own checkout by branch.
+        Git::with_bin("git").rollback_own_worktree(repo.to_str().unwrap(), "wt/foo", None);
+        assert!(!wt.exists());
+        assert!(!branch_exists(&repo, "wt/foo"));
+        assert!(repo.join(".git/worktrees/foreign-gate").is_dir());
+        let config = local_config(&repo);
+        assert!(!config.contains("workmux.worktree.wt.mode"), "{config}");
+        assert!(
+            config.contains("workmux.worktree.foreign-gate.mode"),
+            "{config}"
+        );
     }
 }

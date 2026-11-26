@@ -143,6 +143,8 @@ case "$1" in
       esac
     done
     "$GIT_BIN" -C "$NATIVE_TEST_REPO" worktree add -q -b "$branch" "$NATIVE_TEST_WORKTREE" "$base" || exit 1
+    # Like workmux, keep per-worktree metadata under the checkout's basename.
+    "$GIT_BIN" -C "$NATIVE_TEST_REPO" config "workmux.worktree.$(/usr/bin/basename "$NATIVE_TEST_WORKTREE").mode" window || exit 1
     text=$(/bin/cat "$prompt")
     # Model a persistent tmux server with an independently stale environment.
     if [ -n "${NATIVE_TEST_SERVER_CREATOR_SESSION:-}" ]; then
@@ -154,9 +156,17 @@ case "$1" in
     /bin/ps -o lstart= -p "$pid" > "$NATIVE_TEST_AGENT_START"
     exit 0 ;;
   path) printf '%s\n' "$NATIVE_TEST_WORKTREE"; exit 0 ;;
+  close)
+    if [ -f "$NATIVE_TEST_AGENT_PID" ]; then kill "$(/bin/cat "$NATIVE_TEST_AGENT_PID")" 2>/dev/null || true; fi
+    /bin/rm -f "$NATIVE_TEST_TMUX_STATE"
+    exit 0 ;;
   remove)
+    # Faithful to workmux's cleanup: it prunes every registration in the
+    # repository, which is why Taskfleet must never call it.
     if [ -f "$NATIVE_TEST_AGENT_PID" ]; then kill "$(/bin/cat "$NATIVE_TEST_AGENT_PID")" 2>/dev/null || true; fi
     "$GIT_BIN" -C "$NATIVE_TEST_REPO" worktree remove --force "$NATIVE_TEST_WORKTREE" || exit 1
+    "$GIT_BIN" -C "$NATIVE_TEST_REPO" worktree prune || exit 1
+    "$GIT_BIN" -C "$NATIVE_TEST_REPO" config --remove-section "workmux.worktree.$(/usr/bin/basename "$NATIVE_TEST_WORKTREE")" 2>/dev/null
     exit 0 ;;
 esac
 exit 1

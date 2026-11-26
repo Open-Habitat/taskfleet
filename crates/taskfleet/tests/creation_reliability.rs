@@ -254,3 +254,111 @@ fn supervisor_boot_failure_is_loud_after_native_publication() {
         serde_json::from_slice(&std::fs::read(run.join("nodes/n-0001.json")).unwrap()).unwrap();
     assert!(node["agent_pid"].as_u64().is_some());
 }
+
+fn git_in(repo: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// A failed creation rolls back only its own worktree, branch and workmux
+/// section. A foreign worktree registered in the same repository survives even
+/// while its checkout is invisible to the rolling-back process (another mount
+/// namespace in the field, a moved-aside directory here), which a
+/// repository-wide `git worktree prune` would have unregistered.
+#[test]
+fn rollback_leaves_foreign_worktree_with_invisible_checkout_registered() {
+    let home = TestHome::new();
+    let tools = NativeSpawnTools::new();
+    std::fs::write(
+        home.path().join("config.toml"),
+        r#"[profiles.test]
+description="test"
+capability="fast"
+residency="local"
+agents=[{harness="pi",command=["/usr/bin/true"],telemetry="worker-v1"}]
+[profile]
+default="test"
+"#,
+    )
+    .unwrap();
+    let repo = tools.repo_path().to_path_buf();
+    let scratch = TempDir::new().unwrap();
+    let foreign = scratch.path().join("foreign-gate");
+    let hidden = scratch.path().join("hidden");
+    let foreign_str = foreign.to_str().unwrap();
+    assert!(
+        git_in(&repo, &["worktree", "add", "-q", "--detach", foreign_str])
+            .status
+            .success()
+    );
+    assert!(git_in(
+        &repo,
+        &["config", "workmux.worktree.foreign-gate.mode", "window"]
+    )
+    .status
+    .success());
+    let admin = String::from_utf8(
+        git_in(
+            &foreign,
+            &["rev-parse", "--path-format=absolute", "--git-dir"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    let admin = std::path::PathBuf::from(admin.trim());
+    assert!(admin.is_dir());
+    std::fs::rename(&foreign, &hidden).unwrap();
+
+    let worktree = tools.worktree("worktree");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_taskfleet"));
+    command
+        .env("TASKFLEET_HOME", home.path())
+        .env("HOME", home.path());
+    tools.configure(&mut command, &worktree, "headless");
+    let output = command
+        .args([
+            "--output",
+            "json",
+            "run",
+            "create",
+            "--kind",
+            "spinoff",
+            "--headless",
+            "--title",
+            "foreign",
+            "--task",
+            "work",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        std::fs::read_to_string(tools.workmux_cwd_path()).is_ok(),
+        "the failure must come after `workmux add` materialized the worktree"
+    );
+    assert!(!worktree.exists(), "rollback removes its own worktree");
+
+    std::fs::rename(&hidden, &foreign).unwrap();
+    assert!(admin.is_dir(), "foreign registration must survive rollback");
+    assert!(
+        git_in(&foreign, &["status", "--porcelain"])
+            .status
+            .success(),
+        "foreign checkout is still a working tree"
+    );
+    let config = String::from_utf8(git_in(&repo, &["config", "--local", "--list"]).stdout).unwrap();
+    assert!(
+        config.contains("workmux.worktree.foreign-gate.mode=window"),
+        "foreign workmux section untouched: {config}"
+    );
+    assert!(
+        !config.contains("workmux.worktree.worktree."),
+        "own workmux section removed: {config}"
+    );
+    let branches = String::from_utf8(git_in(&repo, &["branch", "--list", "wt/*"]).stdout).unwrap();
+    assert!(branches.trim().is_empty(), "own branch removed: {branches}");
+}

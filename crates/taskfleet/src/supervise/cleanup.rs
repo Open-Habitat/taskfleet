@@ -977,6 +977,9 @@ fn cleanup_node_after_evidence(paths: &RunPaths, n: &Node, tmux: &str, git: &str
             return;
         }
     }
+    // The checkout is gone: drop workmux's own `workmux.worktree.<handle>`
+    // section with it, which otherwise leaks one section per landed run.
+    let _ = Git::with_bin(git).workmux_meta_remove(repo, worktree_path);
     if let Some(branch) = n.branch.as_deref() {
         let _ = delete_branch(paths, n, repo, branch, git, merged);
     }
@@ -1036,6 +1039,7 @@ pub(crate) fn remove_landed_resident_worktree(
         .map_err(|_| "pane history could not be saved before releasing the display")?;
     close_tmux_window(paths, n, tmux);
     if remove_worktree(repo, worktree_path, git, false) {
+        let _ = Git::with_bin(git).workmux_meta_remove(repo, worktree_path);
         Ok(())
     } else {
         Err("worktree not cleanly removable (dirty/locked)")
@@ -2501,6 +2505,67 @@ mod tests {
             events_of_kind(&paths, "cleanup.branch_remove_failed").is_empty(),
             "branch removal must succeed"
         );
+    }
+
+    /// Teardown removes the run's own worktree and its own workmux section,
+    /// and leaves a foreign registered worktree alone even while its checkout
+    /// is invisible to the supervisor.
+    #[test]
+    fn merged_teardown_removes_own_workmux_section_and_spares_foreign_worktree() {
+        let tmp = TempDir::new().unwrap();
+        let paths = fresh_run(&tmp);
+        bootstrap(&paths, 0);
+        let (repo, wt) = init_repo_with_worktree(&tmp);
+        let foreign = tmp.path().join("foreign-gate");
+        let hidden = tmp.path().join("hidden");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                foreign.to_str().unwrap(),
+            ],
+        );
+        git(&repo, &["config", "workmux.worktree.wt.mode", "window"]);
+        git(
+            &repo,
+            &["config", "workmux.worktree.foreign-gate.mode", "window"],
+        );
+        let admin = repo.join(".git/worktrees/foreign-gate");
+        assert!(admin.is_dir());
+        std::fs::rename(&foreign, &hidden).unwrap();
+
+        let _ = forge_node(
+            &paths,
+            "n-0001",
+            json!({ "worktree_path": wt.to_str().unwrap(), "branch": "wt/foo" }),
+        );
+        report(
+            &paths,
+            "n-0001",
+            json!({ "success": true, "via": "explicit-merge" }),
+        );
+        let n = read_node_opt(&paths, &nid("n-0001")).unwrap().unwrap();
+        cleanup_node(&paths, &n, "/usr/bin/true", &git_bin());
+
+        assert!(!wt.exists());
+        assert!(!branch_exists(&repo, "wt/foo"));
+        assert!(admin.is_dir(), "foreign registration must survive teardown");
+        let config = Command::new("git")
+            .current_dir(&repo)
+            .args(["config", "--local", "--list"])
+            .output()
+            .unwrap();
+        let config = String::from_utf8(config.stdout).unwrap();
+        assert!(!config.contains("workmux.worktree.wt."), "{config}");
+        assert!(
+            config.contains("workmux.worktree.foreign-gate.mode=window"),
+            "{config}"
+        );
+        std::fs::rename(&hidden, &foreign).unwrap();
+        git(&foreign, &["status", "--porcelain"]);
     }
 
     #[test]

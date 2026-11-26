@@ -1308,7 +1308,7 @@ fn rollback_reclaimed_materialization(stale_dir: &Path, stale_id: &RunId) {
     };
     let branch = derive_branch_name(manifest.kind, stale_id, &manifest.title);
     let workmux = std::env::var("WORKMUX_BIN").unwrap_or_else(|_| "workmux".into());
-    let git = std::env::var("GIT_BIN").unwrap_or_else(|_| "git".into());
+    let git = crate::git::repo::Git::with_bin(crate::supervise::cleanup::git_bin());
     let path = Command::new(&workmux)
         .args(["path", &branch])
         .current_dir(repo)
@@ -1318,53 +1318,18 @@ fn rollback_reclaimed_materialization(stale_dir: &Path, stale_id: &RunId) {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            let output = Command::new(&git)
-                .args(["worktree", "list", "--porcelain"])
-                .current_dir(repo)
-                .stdin(Stdio::null())
-                .output()
-                .ok()?;
-            let text = String::from_utf8(output.stdout).ok()?;
-            let expected = format!("branch refs/heads/{branch}");
-            text.split("\n\n").find_map(|record| {
-                let mut worktree = None;
-                let mut matches = false;
-                for line in record.lines() {
-                    if let Some(value) = line.strip_prefix("worktree ") {
-                        worktree = Some(value.to_owned());
-                    }
-                    if line == expected {
-                        matches = true;
-                    }
-                }
-                matches.then_some(worktree).flatten()
-            })
-        });
+        .filter(|s| !s.is_empty());
+    // Close only this run's window. `workmux remove` would also run a
+    // repository-wide `git worktree prune` that unregisters any foreign
+    // worktree whose checkout this process cannot see.
     let _ = Command::new(&workmux)
-        .args(["remove", "--force", &branch])
+        .args(["close", &branch])
         .current_dir(repo)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    if let Some(path) = path {
-        let _ = Command::new(&git)
-            .args(["worktree", "remove", "--force", &path])
-            .current_dir(repo)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = Command::new(&git)
-        .args(["branch", "-D", "--", &branch])
-        .current_dir(repo)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    git.rollback_own_worktree(repo, &branch, path.as_deref());
 }
 
 /// Atomically publish a fully materialized staging run into the public run

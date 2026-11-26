@@ -425,7 +425,11 @@ merge`, or supervisor cleanup. What follows is what each one protects.
    `git worktree remove` is the last safety net on those paths, since git
    refuses to discard a tree that a race dirtied. `run discard --force` is a
    separate, explicitly authorized operator action that records who and why;
-   it does not change any outcome or status. The `--notify` hook fires on the
+   it does not change any outcome or status. Every removal is scoped to the
+   run's own worktree path, branch, and `workmux.worktree.<handle>` config
+   section: a repository-wide `git worktree prune` or `workmux remove`
+   unregisters any foreign worktree whose checkout the calling process cannot
+   see, so taskfleet calls neither. The `--notify` hook fires on the
    terminal transition before teardown and is at-least-once by the owner's
    choice: spawn first, record the `run.notified` marker after, tracked
    separately from `cleaned`. Reordering either silently drops notifications

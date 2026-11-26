@@ -4,8 +4,9 @@
 //! operations the supervisor's teardown + reconcile paths and the `run merge`
 //! path actually use — `rev_list_count`, `is_ancestor`, `merge_tree_clean`,
 //! `tip_committer_time`, `worktree_is_clean`, `main_worktree`,
-//! `worktree_remove`, and `branch_delete` (with the `-d`/`-D` unmerged-safety
-//! distinction). The full branch/remote/status surface is deliberately omitted;
+//! `worktree_remove`, `branch_delete` (with the `-d`/`-D` unmerged-safety
+//! distinction), and the run-scoped `workmux_meta_remove` and
+//! `rollback_own_worktree`. The full branch/remote/status surface is deliberately omitted;
 //! native spawn invokes the explicit `workmux add` CLI through `run::spawn`.
 //!
 //! ## Why this is vendored (not a crate dependency)

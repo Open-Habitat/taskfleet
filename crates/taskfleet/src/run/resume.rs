@@ -110,7 +110,13 @@ fn recreate_worktree(
             "recorded worktree path is not UTF-8",
         )
     })?;
-    let _ = resident::git(repo, &["worktree", "prune"]);
+    // The caller found the checkout missing, so a registration still claiming
+    // the recorded path is this resident's own stale entry: unregister exactly
+    // that one. A repository-wide `git worktree prune` would also unregister
+    // any foreign worktree whose checkout this process cannot see.
+    if !worktree.exists() {
+        let _ = resident::git(repo, &["worktree", "remove", wt]);
+    }
     let branch_exists = resident::git(
         repo,
         &[
@@ -546,5 +552,78 @@ fn ensure_supervisor(paths: &RunPaths) {
                 "resumed resident worker has no supervisor; run `taskfleet run reattach`"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use tempfile::TempDir;
+
+    fn git(cwd: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?} failed in {cwd:?}");
+    }
+
+    /// Recreating a dormant resident's missing checkout unregisters only its
+    /// own stale entry; a foreign worktree whose checkout is invisible to this
+    /// process stays registered.
+    #[test]
+    fn recreate_spares_foreign_registration_with_invisible_checkout() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "init",
+            ],
+        );
+        let wt = tmp.path().join("resident");
+        let foreign = tmp.path().join("foreign-gate");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt/res",
+                wt.to_str().unwrap(),
+            ],
+        );
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                foreign.to_str().unwrap(),
+            ],
+        );
+        std::fs::remove_dir_all(&wt).unwrap();
+        std::fs::rename(&foreign, tmp.path().join("hidden")).unwrap();
+
+        recreate_worktree(&repo, &wt, "wt/res", "main").unwrap();
+
+        assert!(wt.join(".git").exists(), "resident checkout recreated");
+        assert!(repo.join(".git/worktrees/foreign-gate").is_dir());
     }
 }

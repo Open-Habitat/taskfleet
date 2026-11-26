@@ -1404,68 +1404,26 @@ impl Rollback {
 }
 impl Drop for Rollback {
     fn drop(&mut self) {
-        if self.committed {
+        if self.committed || !self.workmux_added {
             return;
         }
-        if self.workmux_added && self.keep_tmux_on_error {
-            // Preserve the old debug contract: leave the pane, but remove git
-            // resources without asking workmux to kill that pane.
-            if let Some(path) = &self.worktree_path {
-                let _ = command_output(
-                    "git",
-                    &[
-                        "worktree".into(),
-                        "remove".into(),
-                        "--force".into(),
-                        path.clone(),
-                    ],
-                    &self.cwd,
-                    "rollback",
-                );
-            }
-            let _ = command_output(
-                "git",
-                &[
-                    "branch".into(),
-                    "-D".into(),
-                    "--".into(),
-                    self.branch.clone(),
-                ],
-                &self.cwd,
-                "rollback",
-            );
-        } else if self.workmux_added {
+        if !self.keep_tmux_on_error {
+            // Close only this run's window. `workmux remove` would also run a
+            // repository-wide `git worktree prune` that unregisters any foreign
+            // worktree whose checkout this process cannot see. With
+            // `keep_tmux_on_error` the pane stays for debugging.
             let _ = command_output(
                 "workmux",
-                &["remove".into(), "--force".into(), self.branch.clone()],
-                &self.cwd,
-                "rollback",
-            );
-            if let Some(path) = &self.worktree_path {
-                let _ = command_output(
-                    "git",
-                    &[
-                        "worktree".into(),
-                        "remove".into(),
-                        "--force".into(),
-                        path.clone(),
-                    ],
-                    &self.cwd,
-                    "rollback",
-                );
-            }
-            let _ = command_output(
-                "git",
-                &[
-                    "branch".into(),
-                    "-D".into(),
-                    "--".into(),
-                    self.branch.clone(),
-                ],
+                &["close".into(), self.branch.clone()],
                 &self.cwd,
                 "rollback",
             );
         }
+        let Some(repo) = self.cwd.to_str() else {
+            return;
+        };
+        crate::git::repo::Git::with_bin(crate::supervise::cleanup::git_bin())
+            .rollback_own_worktree(repo, &self.branch, self.worktree_path.as_deref());
     }
 }
 
