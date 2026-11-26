@@ -4862,6 +4862,19 @@ EOF
         perms.set_mode(0o700);
         std::fs::set_permissions(&self_exe, perms).unwrap();
         let _self_exe = EnvGuard::set("TASKFLEET_TEST_SELF_EXE", self_exe.to_str().unwrap());
+        // The retry inherits Pi's trust decision for the recorded source
+        // checkout, read from a fixture store rather than the developer's.
+        let pi_agent = tmp.path().join("pi-agent");
+        std::fs::create_dir_all(&pi_agent).unwrap();
+        let source = std::path::PathBuf::from(manifest.source_repo.clone().unwrap())
+            .canonicalize()
+            .unwrap();
+        std::fs::write(
+            pi_agent.join("trust.json"),
+            serde_json::json!({ source.to_str().unwrap(): true }).to_string(),
+        )
+        .unwrap();
+        let _pi_agent = EnvGuard::set("PI_CODING_AGENT_DIR", pi_agent.to_str().unwrap());
 
         let spawned = respawn_agent(&paths, &node, &manifest, 3).unwrap();
         let _agent = AgentPidGuard(spawned.agent_pid);
@@ -4889,13 +4902,13 @@ EOF
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let observed = std::fs::read_to_string(observed).unwrap();
-        let expected_prefix = format!("{}\nn-0001\n3\n6\n--extension\n", manifest.run_id);
+        let expected_prefix = format!("{}\nn-0001\n3\n7\n--extension\n", manifest.run_id);
         assert!(
             observed.starts_with(&expected_prefix),
             "observed={observed:?}"
         );
         assert!(observed.contains(&format!(
-            "/.creating/message-{}.ts\n--session\n",
+            "/.creating/message-{}.ts\n--approve\n--session\n",
             manifest.run_id
         )));
         assert!(
