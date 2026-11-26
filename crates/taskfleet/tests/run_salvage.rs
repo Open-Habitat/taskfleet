@@ -228,7 +228,10 @@ fn rebase_conflict_aborts_and_leaves_branch_as_found() {
         String::from_utf8(git(&worktree, &["symbolic-ref", "--short", "HEAD"])).unwrap(),
         "wt/dry\n"
     );
-    assert!(git(&worktree, &["status", "--porcelain"]).is_empty());
+    assert_eq!(
+        String::from_utf8(git(&worktree, &["status", "--porcelain"])).unwrap(),
+        ""
+    );
     for name in ["rebase-merge", "rebase-apply"] {
         let p = git(
             &worktree,
