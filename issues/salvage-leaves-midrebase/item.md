@@ -3,11 +3,13 @@ created: 2026-11-23
 updated: 2026-11-26
 type: bug
 reporter: jari
-status: in-progress
+status: fixed
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:salvage-midrebase-20261123
 lane: salvage
+closed: 2026-11-26
+closed_by: agent:taskfleet-worker
 ---
 
 # run salvage leaves the preserved worktree mid-rebase after merge_failed
