@@ -9,7 +9,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+<!-- oss-changelog:unreleased-end -->
+
+## [0.21.0] - 2026-11-26
+
+### Added
+
 - A worker can ask its parent agent a blocking question (`worker-question-to-parent`, ADR 0004). `node ask (--current | <run> <node>) --question … --default … [--option …] [--timeout 30m] [--wait 8m] --idempotency-key …` records `node.asked` and blocks: exit 0 `answered` (act on `data.take`), 4 `pending` (re-run with the same key; the deadline never moves), 2 `timed_out` (continue on the default, recorded as `node.ask_timed_out`), 3 `cancelled` (the node ended). The parent answers with `run answer <run> --ask <id> (--text | --body-file | --choice) [--decided-by agent|person]` or passes the question to a person with `run escalate <run> --ask <id> [--extend 4h] [--note …]`. A default `run wait` returns at once on an open, non-escalated question (`asked: true`, `open_ask`); `run show`, `run list` and `run wait` expose `open_ask` and `last_ask`. One question per node; the first closing event wins; a late answer is refused with `ask_closed` and names the default taken. Plain shell commands, so Pi, Claude and Codex workers all use it.
+
+- Conductor skills: separate private narrative root from the product tracker and worker source (`conductor-separate-product-root`).
 
 ### Changed
 
@@ -22,7 +33,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Bump `rustix` to 1.1.6 for the unsound xattr buffer advisory RUSTSEC-2026-0486 (`cargo-deny-advisories-2026-11`).
-<!-- oss-changelog:unreleased-end -->
 
 ## [0.20.0] - 2026-11-08
 
