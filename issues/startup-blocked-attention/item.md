@@ -2,7 +2,7 @@
 created: 2026-11-14
 updated: 2026-11-26
 type: feature
-status: open
+status: in-progress
 priority: normal
 provenance: other
 source_ref: open-habitat:taskfleet-worker-trust-prompt
