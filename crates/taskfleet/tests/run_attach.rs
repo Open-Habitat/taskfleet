@@ -282,16 +282,27 @@ fn stale_and_absent_targets_never_fall_back_or_start_a_viewer() {
     let calls = std::fs::read_to_string(f.dir.path().join("calls")).unwrap();
     assert!(!calls.contains("if-shell"));
     assert!(!calls.contains("new-session"));
-    // PID-generation mismatch is rejected before touching the socket.
+    // PID-generation mismatch is rejected before touching the socket: a
+    // legacy seconds-only record beyond its tolerance, and a recorded kernel
+    // start identity that differs even though the seconds agree.
     let node = NodeId::parse_str("n-0001").unwrap();
-    append_and_apply_event(&f.paths, "node.retry", Some(&node), None, json!({
-        "tmux_socket":f.socket, "tmux_session":SESSION, "tmux_window_id":"@12", "tmux_pane_id":"%23",
-        "tmux_server_pid":f.pid,"tmux_server_pid_start_secs":f.start + 1
-    })).unwrap();
-    error(
-        f.cmd("attach").arg("--json").output().unwrap(),
-        "display_stale",
-    );
+    for generation in [
+        json!({"tmux_server_pid_start_secs":f.start + 5}),
+        json!({"tmux_server_pid_start_secs":f.start, "tmux_server_pid_start_identity":"linux:1"}),
+    ] {
+        let mut data = json!({
+            "tmux_socket":f.socket, "tmux_session":SESSION, "tmux_window_id":"@12",
+            "tmux_pane_id":"%23", "tmux_server_pid":f.pid, "tmux_server_marker":"fixture",
+        });
+        data.as_object_mut()
+            .unwrap()
+            .extend(generation.as_object().unwrap().clone());
+        append_and_apply_event(&f.paths, "node.retry", Some(&node), None, data).unwrap();
+        error(
+            f.cmd("attach").arg("--json").output().unwrap(),
+            "display_stale",
+        );
+    }
     assert_eq!(
         std::fs::read_to_string(f.dir.path().join("calls")).unwrap(),
         calls
@@ -491,4 +502,34 @@ fn attach_help_explains_json_and_native_behavior() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(text.contains("outside tmux"));
     assert!(text.contains("descriptor without attaching"));
+}
+
+/// `/proc/<pid>/stat` field 22, the kernel start identity Taskfleet records.
+#[cfg(target_os = "linux")]
+fn kernel_start_identity(pid: u32) -> String {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let ticks = stat
+        .rsplit_once(") ")
+        .unwrap()
+        .1
+        .split_whitespace()
+        .nth(19)
+        .unwrap();
+    format!("linux:{ticks}")
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn recorded_kernel_identity_survives_a_wall_clock_step() {
+    // A tmux server whose seconds drifted after an NTP step is still the
+    // recorded server when its kernel start identity matches.
+    let f = Fixture::new(true);
+    append_and_apply_event(&f.paths, "node.created", Some(&NodeId::parse_str("n-0001").unwrap()), None, json!({
+        "kind":"spinoff", "attempt":0,
+        "tmux_socket":f.socket, "tmux_session":SESSION, "tmux_window_id":"@12", "tmux_pane_id":"%23",
+        "tmux_server_pid":f.pid, "tmux_server_pid_start_secs":f.start - 5,
+        "tmux_server_pid_start_identity":kernel_start_identity(f.pid),
+        "tmux_server_marker":"fixture",
+    })).unwrap();
+    assert_eq!(f.json()["state"], "validated");
 }

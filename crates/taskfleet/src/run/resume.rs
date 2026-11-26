@@ -446,6 +446,7 @@ pub(crate) fn resume(
         "tmux_pane_id": outcome.tmux_pane_id,
         "tmux_server_pid": outcome.tmux_server_pid,
         "tmux_server_pid_start_secs": outcome.tmux_server_pid_start_secs,
+        "tmux_server_pid_start_identity": outcome.tmux_server_pid_start_identity,
         "tmux_server_marker": outcome.tmux_server_marker,
         "pi_session_id": outcome.pi_session_id,
         "pi_session_path": outcome.pi_session_path,

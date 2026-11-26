@@ -87,6 +87,7 @@ pub(crate) fn discover(paths: &RunPaths, manifest: &Manifest, nodes: &[Node]) ->
                 pane_id: Some(retained.pane_id.clone()),
                 server_pid: Some(retained.server_pid),
                 server_pid_start_secs: Some(retained.server_pid_start_secs),
+                server_pid_start_identity: retained.server_pid_start_identity.clone(),
                 server_marker: Some(retained.server_marker.clone()),
             },
             "retained",
@@ -107,7 +108,8 @@ pub(crate) fn discover(paths: &RunPaths, manifest: &Manifest, nodes: &[Node]) ->
             .as_deref()
             .is_some_and(|s| id_valid(s, '%'))
         || identity.server_pid.is_none_or(|p| p == 0)
-        || identity.server_pid_start_secs.is_none()
+        || (identity.server_pid_start_secs.is_none()
+            && identity.server_pid_start_identity.is_none())
     {
         return Attachment::unavailable("incomplete-display-identity");
     }

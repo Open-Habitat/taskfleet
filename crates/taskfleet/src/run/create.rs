@@ -1057,6 +1057,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         "tmux_pane_id": outcome.tmux_pane_id,
         "tmux_server_pid": outcome.tmux_server_pid,
         "tmux_server_pid_start_secs": outcome.tmux_server_pid_start_secs,
+        "tmux_server_pid_start_identity": outcome.tmux_server_pid_start_identity,
         "tmux_server_marker": outcome.tmux_server_marker,
         // Exact native Pi session identity was assigned and its header durably
         // created by the pre-exec handshake before the candidate started.

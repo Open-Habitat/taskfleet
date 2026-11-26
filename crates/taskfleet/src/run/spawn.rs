@@ -31,6 +31,7 @@ pub struct SpawnOutcome {
     pub tmux_pane_id: Option<String>,
     pub tmux_server_pid: Option<u32>,
     pub tmux_server_pid_start_secs: Option<u64>,
+    pub tmux_server_pid_start_identity: Option<String>,
     pub tmux_server_marker: Option<String>,
     pub pi_session_id: Option<String>,
     pub pi_session_path: Option<String>,
@@ -746,6 +747,7 @@ fn test_script_materialize(req: &SpawnRequest<'_>) -> Option<Result<SpawnOutcome
                 tmux_pane_id: o.tmux_pane_id,
                 tmux_server_pid: None,
                 tmux_server_pid_start_secs: None,
+                tmux_server_pid_start_identity: None,
                 tmux_server_marker: None,
                 pi_session_id: None,
                 pi_session_path: None,
@@ -856,7 +858,8 @@ fn materialize(req: &SpawnRequest<'_>) -> Result<SpawnOutcome, CliError> {
     if req.require_server_identity
         && (window.identity.socket.as_deref().is_none_or(str::is_empty)
             || window.server_pid.is_none()
-            || window.server_pid_start_secs.is_none())
+            || window.server_pid_start_secs.is_none()
+            || window.server_pid_start_identity.is_none())
     {
         return Err(CliError::system(
             "tmux_server_identity_unavailable",
@@ -889,6 +892,7 @@ fn materialize(req: &SpawnRequest<'_>) -> Result<SpawnOutcome, CliError> {
         tmux_pane_id: Some(pane),
         tmux_server_pid: window.server_pid,
         tmux_server_pid_start_secs: window.server_pid_start_secs,
+        tmux_server_pid_start_identity: window.server_pid_start_identity,
         tmux_server_marker: window.server_marker,
         pi_session_id: handshake.pi_session_id,
         pi_session_path: handshake.pi_session_path,
@@ -967,8 +971,12 @@ pub fn materialize_resume(req: &ResumeRequest<'_>) -> Result<SpawnOutcome, CliEr
             fields.next()?.parse::<u32>().ok()?,
         );
         let same_server = pid == recorded_pid
-            && identity.server_pid_start_secs.is_some()
-            && crate::supervise::watchdog::pid_start_time(pid) == identity.server_pid_start_secs
+            && crate::supervise::watchdog::RecordedStart::new(
+                identity.server_pid_start_secs,
+                identity.server_pid_start_identity.as_deref(),
+            )
+            .matches(pid)
+                == Some(true)
             && identity.socket.as_deref().is_none_or(|s| s == socket);
         (same_server && session == identity.session && window == identity.window_id)
             .then(|| pane.to_string())
@@ -1095,7 +1103,8 @@ fn resume_after_launch(
     if req.require_server_identity
         && (window.identity.socket.as_deref().is_none_or(str::is_empty)
             || window.server_pid.is_none()
-            || window.server_pid_start_secs.is_none())
+            || window.server_pid_start_secs.is_none()
+            || window.server_pid_start_identity.is_none())
     {
         return Err(CliError::system(
             "tmux_server_identity_unavailable",
@@ -1115,6 +1124,7 @@ fn resume_after_launch(
         tmux_pane_id: Some(pane),
         tmux_server_pid: window.server_pid,
         tmux_server_pid_start_secs: window.server_pid_start_secs,
+        tmux_server_pid_start_identity: window.server_pid_start_identity,
         tmux_server_marker: window.server_marker,
         pi_session_id: handshake.pi_session_id,
         pi_session_path: handshake.pi_session_path,
@@ -1336,6 +1346,7 @@ struct TmuxWindow {
     name: String,
     server_pid: Option<u32>,
     server_pid_start_secs: Option<u64>,
+    server_pid_start_identity: Option<String>,
     server_marker: Option<String>,
 }
 
@@ -1371,6 +1382,8 @@ fn query_tmux_window(
         ));
     }
     let server_pid_start_secs = server_pid.and_then(crate::supervise::watchdog::pid_start_time);
+    let server_pid_start_identity =
+        server_pid.and_then(crate::supervise::watchdog::pid_start_identity);
     Ok(TmuxWindow {
         identity: TmuxIdentity {
             socket: (!socket.is_empty()).then(|| socket.into()),
@@ -1379,11 +1392,13 @@ fn query_tmux_window(
             pane_id: Some(pane.into()),
             server_pid,
             server_pid_start_secs,
+            server_pid_start_identity: server_pid_start_identity.clone(),
             server_marker: (!server_marker.is_empty()).then(|| server_marker.into()),
         },
         name: name.into(),
         server_pid,
         server_pid_start_secs,
+        server_pid_start_identity,
         server_marker: (!server_marker.is_empty()).then(|| server_marker.into()),
     })
 }

@@ -20,6 +20,7 @@ use taskfleet_core::{
 use crate::error::CliError;
 use crate::output::{self, OutputFormat, OutputSpec};
 use crate::proc::{run_with_timeout, TimedOutcome};
+use crate::supervise::watchdog::RecordedStart;
 
 const TMUX_TIMEOUT: Duration = Duration::from_secs(3);
 const OUTPUT_CAP: usize = 256 * 1024;
@@ -252,14 +253,22 @@ fn read_nodes(paths: &RunPaths) -> taskfleet_core::Result<Vec<Node>> {
 }
 
 fn mark_count_expiry(candidates: &mut [Candidate]) {
-    let mut groups: BTreeMap<(String, String, u32, u64, String), Vec<usize>> = BTreeMap::new();
+    let mut groups: BTreeMap<(String, String, u32, String, String), Vec<usize>> = BTreeMap::new();
     for (index, candidate) in candidates.iter().enumerate() {
+        // Displays recorded hours apart on one server can carry different
+        // seconds (they drift with wall-clock steps), so the server generation
+        // is the kernel identity whenever one was recorded.
+        let generation = candidate
+            .display
+            .server_pid_start_identity
+            .clone()
+            .unwrap_or_else(|| format!("seconds:{}", candidate.display.server_pid_start_secs));
         groups
             .entry((
                 candidate.display.socket.clone(),
                 candidate.display.session.clone(),
                 candidate.display.server_pid,
-                candidate.display.server_pid_start_secs,
+                generation,
                 candidate.display.server_marker.clone(),
             ))
             .or_default()
@@ -377,7 +386,10 @@ fn inspect_exact_display(display: &RetainedDisplay, deadline: Instant) -> Inspec
         &display.socket,
         &display.session,
         display.server_pid,
-        display.server_pid_start_secs,
+        &RecordedStart::new(
+            Some(display.server_pid_start_secs),
+            display.server_pid_start_identity.as_deref(),
+        ),
         &display.server_marker,
         Some(deadline),
     ) {
@@ -465,21 +477,24 @@ pub(crate) fn retain_completed_display(paths: &RunPaths, node: &Node, tmux: &str
     let Some(identity) = node.tmux_identity.as_ref() else {
         return Retention::Retry;
     };
-    let (Some(socket), Some(pane_id), Some(server_pid), Some(server_start)) = (
+    let (Some(socket), Some(pane_id), Some(server_pid)) = (
         identity.socket.as_deref(),
         identity.pane_id.as_deref(),
         identity.server_pid,
-        identity.server_pid_start_secs,
     ) else {
         return Retention::Retry;
     };
+    let server_start = recorded_server_start(identity);
+    if identity.server_pid_start_secs.is_none() || !server_start.is_recorded() {
+        return Retention::Retry;
+    }
     let expected_server_marker = identity.server_marker.as_deref().unwrap_or("");
     match server_identity(
         tmux,
         socket,
         &identity.session,
         server_pid,
-        server_start,
+        &server_start,
         expected_server_marker,
         None,
     ) {
@@ -653,16 +668,20 @@ fn mark_original_shell(
     let (Some(socket), Some(worktree)) = (identity.socket.as_deref(), worktree) else {
         return;
     };
-    let (Some(pid), Some(start)) = (identity.server_pid, identity.server_pid_start_secs) else {
+    let Some(pid) = identity.server_pid else {
         return;
     };
+    let start = recorded_server_start(identity);
+    if !start.is_recorded() {
+        return;
+    }
     if !matches!(
         server_identity(
             tmux,
             socket,
             &identity.session,
             pid,
-            start,
+            &start,
             identity.server_marker.as_deref().unwrap_or(""),
             None
         ),
@@ -809,15 +828,18 @@ pub(crate) fn close_original_workmux_window(paths: &RunPaths, node: &Node, tmux:
     let Some(identity) = node.tmux_identity.as_ref() else {
         return;
     };
-    let (Some(socket), Some(worktree), Some(pid), Some(start), Some(worker)) = (
+    let (Some(socket), Some(worktree), Some(pid), Some(worker)) = (
         identity.socket.as_deref(),
         node.worktree_path.as_deref(),
         identity.server_pid,
-        identity.server_pid_start_secs,
         identity.pane_id.as_deref(),
     ) else {
         return;
     };
+    let start = recorded_server_start(identity);
+    if !start.is_recorded() {
+        return;
+    }
     mark_original_shell(
         tmux,
         identity,
@@ -831,7 +853,7 @@ pub(crate) fn close_original_workmux_window(paths: &RunPaths, node: &Node, tmux:
             socket,
             &identity.session,
             pid,
-            start,
+            &start,
             identity.server_marker.as_deref().unwrap_or(""),
             None
         ),
@@ -877,7 +899,7 @@ pub(crate) fn close_original_workmux_window(paths: &RunPaths, node: &Node, tmux:
             socket,
             &identity.session,
             pid,
-            start,
+            &start,
             identity.server_marker.as_deref().unwrap_or(""),
             None
         ),
@@ -1004,19 +1026,19 @@ fn inspect_original_pane(
     identity: &taskfleet_core::TmuxIdentity,
     pane: &str,
 ) -> OriginalPane {
-    let (Some(socket), Some(server_pid), Some(server_start)) = (
-        identity.socket.as_deref(),
-        identity.server_pid,
-        identity.server_pid_start_secs,
-    ) else {
+    let (Some(socket), Some(server_pid)) = (identity.socket.as_deref(), identity.server_pid) else {
         return OriginalPane::Unsafe;
     };
+    let server_start = recorded_server_start(identity);
+    if !server_start.is_recorded() {
+        return OriginalPane::Unsafe;
+    }
     match server_identity(
         tmux,
         socket,
         &identity.session,
         server_pid,
-        server_start,
+        &server_start,
         identity.server_marker.as_deref().unwrap_or(""),
         None,
     ) {
@@ -1075,17 +1097,42 @@ enum IdentityCheck {
     Unsafe(String),
 }
 
+/// What a node recorded about its tmux server's start: the kernel identity
+/// when present, else the legacy seconds.
+fn recorded_server_start(identity: &taskfleet_core::TmuxIdentity) -> RecordedStart {
+    RecordedStart::new(
+        identity.server_pid_start_secs,
+        identity.server_pid_start_identity.as_deref(),
+    )
+}
+
+/// Whether the process at `pid` is still the recorded tmux server generation.
+/// The kernel start identity decides by exact equality; seconds decide only for
+/// a record that predates it, since they drift with wall-clock steps. A start
+/// that cannot be read while the PID is still alive is `Unsafe`, never `Gone`:
+/// `Gone` gives up retention and expires tracked displays.
+fn server_generation(pid: u32, start: &RecordedStart) -> Option<IdentityCheck> {
+    match start.matches(pid) {
+        Some(true) => None,
+        Some(false) => Some(IdentityCheck::Gone),
+        None if !crate::supervise::pid_file::pid_alive(pid) => Some(IdentityCheck::Gone),
+        None => Some(IdentityCheck::Unsafe(
+            "tmux server start identity is unreadable".into(),
+        )),
+    }
+}
+
 fn server_identity(
     tmux: &str,
     socket: &str,
     session: &str,
     pid: u32,
-    start: u64,
+    start: &RecordedStart,
     marker: &str,
     deadline: Option<Instant>,
 ) -> IdentityCheck {
-    if crate::supervise::watchdog::pid_start_time(pid) != Some(start) {
-        return IdentityCheck::Gone;
+    if let Some(verdict) = server_generation(pid, start) {
+        return verdict;
     }
     let format = "#{socket_path}\t#{session_name}\t#{pid}\t#{HOMEBASE_TMUX_OWNER}";
     let result = deadline.map_or_else(
@@ -1200,6 +1247,7 @@ fn find_owned_display(
     let socket = identity.socket.as_deref()?;
     let server_pid = identity.server_pid?;
     let server_start = identity.server_pid_start_secs?;
+    let server_start_identity = identity.server_pid_start_identity.clone();
     let format = format!("#{{window_id}}\t#{{pane_id}}\t#{{pane_dead}}\t#{{{OWNER_OPTION}}}");
     let target = exact_session_target(&identity.session);
     let text = tmux_text_bin(
@@ -1233,6 +1281,7 @@ fn find_owned_display(
         pane_id: matches[0][1].into(),
         server_pid,
         server_pid_start_secs: server_start,
+        server_pid_start_identity: server_start_identity,
         server_marker: identity.server_marker.clone().unwrap_or_default(),
         ownership_marker: marker.into(),
         retained_at,
@@ -1628,7 +1677,10 @@ mod tests {
             window_id: window.into(),
             pane_id: pane.into(),
             server_pid: server,
-            server_pid_start_secs: crate::supervise::watchdog::pid_start_time(server).unwrap(),
+            // Seconds stale by more than the legacy tolerance, as after a
+            // wall-clock step: the recorded kernel identity still decides.
+            server_pid_start_secs: crate::supervise::watchdog::pid_start_time(server).unwrap() - 5,
+            server_pid_start_identity: crate::supervise::watchdog::pid_start_identity(server),
             server_marker: String::new(),
             ownership_marker: marker,
             retained_at: Timestamp::now() - jiff::SignedDuration::from_hours(2),
@@ -1920,6 +1972,7 @@ mod tests {
             pane_id: Some(worker.into()),
             server_pid: Some(pid),
             server_pid_start_secs: crate::supervise::watchdog::pid_start_time(pid),
+            server_pid_start_identity: crate::supervise::watchdog::pid_start_identity(pid),
             server_marker: Some(String::new()),
         };
         append_and_apply_event(
@@ -1932,6 +1985,7 @@ mod tests {
                 "tmux_socket":socket, "tmux_session":"agents", "tmux_window_id":window,
                 "tmux_pane_id":worker, "tmux_server_pid":pid,
                 "tmux_server_pid_start_secs":identity.server_pid_start_secs,
+                "tmux_server_pid_start_identity":identity.server_pid_start_identity,
             }),
         )
         .unwrap();
@@ -2176,7 +2230,8 @@ mod tests {
                         window_id: format!("@{index}"),
                         pane_id: format!("%{index}"),
                         server_pid: 42,
-                        server_pid_start_secs: 7,
+                        server_pid_start_secs: 7 + u64::from(index == 2),
+                        server_pid_start_identity: Some("linux:700".into()),
                         server_marker: "owner".into(),
                         ownership_marker: format!("owned-{index}"),
                         retained_at,
@@ -2208,6 +2263,34 @@ mod tests {
     }
 
     #[test]
+    fn server_generation_decides_from_kernel_identity_and_never_reads_unreadable_as_gone() {
+        let me = std::process::id();
+        let identity = crate::supervise::watchdog::pid_start_identity(me).unwrap();
+        // Stale seconds do not matter once an identity was recorded.
+        assert!(server_generation(me, &RecordedStart::new(Some(1), Some(&identity))).is_none());
+        assert!(matches!(
+            server_generation(me, &RecordedStart::new(None, Some("linux:1"))),
+            Some(IdentityCheck::Gone)
+        ));
+        // Legacy seconds-only record keeps the seconds comparison.
+        let secs = crate::supervise::watchdog::pid_start_time(me).unwrap();
+        assert!(server_generation(me, &RecordedStart::new(Some(secs), None)).is_none());
+        assert!(matches!(
+            server_generation(me, &RecordedStart::new(Some(secs + 5), None)),
+            Some(IdentityCheck::Gone)
+        ));
+        // Nothing provable about a live process is unsafe, not gone.
+        assert!(matches!(
+            server_generation(me, &RecordedStart::default()),
+            Some(IdentityCheck::Unsafe(_))
+        ));
+        assert!(matches!(
+            server_generation(u32::MAX, &RecordedStart::new(None, Some(&identity))),
+            Some(IdentityCheck::Gone)
+        ));
+    }
+
+    #[test]
     fn wrong_server_identity_and_split_retained_window_fail_closed() {
         let display = RetainedDisplay {
             attempt: 0,
@@ -2217,6 +2300,7 @@ mod tests {
             pane_id: "%1".into(),
             server_pid: u32::MAX,
             server_pid_start_secs: 1,
+            server_pid_start_identity: None,
             server_marker: String::new(),
             ownership_marker: "owned".into(),
             retained_at: Timestamp::now(),

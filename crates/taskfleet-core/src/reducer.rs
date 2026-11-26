@@ -691,6 +691,7 @@ fn tmux_identity_from_data(d: &Value) -> Option<TmuxIdentity> {
             .and_then(Value::as_u64)
             .and_then(|value| u32::try_from(value).ok()),
         server_pid_start_secs: d.get("tmux_server_pid_start_secs").and_then(Value::as_u64),
+        server_pid_start_identity: nonempty("tmux_server_pid_start_identity"),
         server_marker: nonempty("tmux_server_marker"),
     })
 }

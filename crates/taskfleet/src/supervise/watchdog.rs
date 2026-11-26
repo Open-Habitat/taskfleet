@@ -867,6 +867,7 @@ mod tests {
             pane_id: None,
             server_pid: None,
             server_pid_start_secs: None,
+            server_pid_start_identity: None,
             server_marker: None,
         }
     }

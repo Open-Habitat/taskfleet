@@ -1001,8 +1001,14 @@ pub struct RetainedDisplay {
     pub pane_id: String,
     /// tmux server PID observed at worker spawn and retention creation.
     pub server_pid: u32,
-    /// OS process start identity for `server_pid`, guarding PID/socket reuse.
+    /// Unix-second start time of `server_pid`. It drifts with wall-clock steps
+    /// on Linux, so it guards PID/socket reuse only for a display recorded
+    /// without `server_pid_start_identity`.
     pub server_pid_start_secs: u64,
+    /// Kernel start identity of `server_pid` (`linux:<starttime ticks>` or
+    /// `macos:<sec>:<usec>`), compared exactly to guard PID/socket reuse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_pid_start_identity: Option<String>,
     /// Runtime-owned server marker observed at spawn (empty when unset).
     pub server_marker: String,
     /// Exact Taskfleet ownership marker stored as a tmux window option.
@@ -1581,9 +1587,14 @@ pub struct TmuxIdentity {
     /// sessions require both; legacy nodes deserialize them as absent.
     #[serde(default)]
     pub server_pid: Option<u32>,
-    /// Unix-second process start identity for the recorded tmux server PID.
+    /// Unix-second start time of the recorded tmux server PID. It drifts with
+    /// wall-clock steps on Linux, so it decides server identity only for a
+    /// node recorded without `server_pid_start_identity`.
     #[serde(default)]
     pub server_pid_start_secs: Option<u64>,
+    /// Kernel start identity of the recorded tmux server PID, compared exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_pid_start_identity: Option<String>,
     /// Runtime-owned server marker (for example Homebase's owner marker).
     #[serde(default)]
     pub server_marker: Option<String>,
@@ -1784,6 +1795,7 @@ mod tests {
             pane_id: Some("%7".into()),
             server_pid: None,
             server_pid_start_secs: None,
+            server_pid_start_identity: None,
             server_marker: None,
         };
         assert_eq!(with_pane.capture_target(), "%7");
