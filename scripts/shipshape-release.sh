@@ -15,6 +15,7 @@ shipshape_commit=""
 run_id=""
 tag=""
 bump_commit=""
+main_commit=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -269,34 +270,113 @@ validate_bump_tree() {
   test -z "$(git status --porcelain)" || { echo "bump tree must be clean" >&2; exit 2; }
 }
 
+# True when every path read NUL-separated from stdin lies under issues/.
+paths_only_issues() {
+  local path
+  while IFS= read -r -d '' path; do
+    [[ "$path" == issues/* ]] || return 1
+  done
+  return 0
+}
+
+# True when from..to adds only intake filings: every commit's change against
+# its first parent, and the net change, touch nothing outside issues/.
+# --no-renames makes a move out of the code tree count as a deletion there.
+range_only_issues() {
+  local from="$1" to="$2" commits commit
+  git diff -z --name-only --no-renames "$from" "$to" | paths_only_issues || return 1
+  commits="$(git rev-list "$from..$to")" || return 1
+  for commit in $commits; do
+    git diff -z --name-only --no-renames "$commit^1" "$commit" | paths_only_issues || return 1
+  done
+}
+
+# Establish, in main_commit, the main tip this release validates and leaves on
+# origin. Normally that is the bump commit. Intake filings land on origin/main
+# routinely while a cut is held. The bump commit cannot be rebased over them:
+# the Shipshape journal, the held local tag, the authorization ref, and
+# Shipshape's advance_branch all bind the release to the journalled bump
+# commit. Main instead becomes a merge of the bump commit and that intake,
+# whose tree differs from the bump commit only under issues/; the merge is
+# what gets validated, the tag stays on the bump commit, and advance_branch
+# accepts a main that already contains it. Any other movement is refused.
 advance_main_to_bump() {
-  local base origin_main
+  local base origin_main bump_parent target tree
   base="$(git rev-parse HEAD)"
-  git merge-base --is-ancestor "$base" "$bump_commit" || {
+  # Local main is either behind the bump commit or already a release main
+  # built on it by an earlier pass of this run.
+  git merge-base --is-ancestor "$base" "$bump_commit" ||
+    git merge-base --is-ancestor "$bump_commit" "$base" || {
     echo "bump commit is not a descendant of local main" >&2
     exit 2
   }
   git fetch origin +refs/heads/main:refs/remotes/origin/main
   origin_main="$(git rev-parse refs/remotes/origin/main)"
-  [[ "$origin_main" == "$base" || "$origin_main" == "$bump_commit" ]] || {
-    echo "origin/main moved to $origin_main during the release; reconcile deliberately" >&2
+
+  # Main already carries the bump commit (pushed earlier in this run), possibly
+  # with intake on top: adopt it without pushing.
+  if [[ "$origin_main" == "$bump_commit" ]] ||
+     { git merge-base --is-ancestor "$bump_commit" "$origin_main" &&
+       range_only_issues "$bump_commit" "$origin_main"; }; then
+    if [[ "$base" != "$origin_main" ]]; then
+      git merge-base --is-ancestor "$base" "$origin_main" || {
+        echo "local main $base is not an ancestor of origin/main $origin_main; reconcile deliberately" >&2
+        exit 1
+      }
+      git merge --ff-only "$origin_main"
+    fi
+    main_commit="$origin_main"
+    validate_bump_tree
+    return
+  fi
+
+  if git merge-base --is-ancestor "$bump_commit" "$origin_main"; then
+    echo "origin/main moved to $origin_main during the release with changes outside issues/; reconcile deliberately" >&2
     exit 1
+  fi
+  git merge-base --is-ancestor "$base" "$bump_commit" || {
+    echo "local main $base is past bump commit $bump_commit but origin/main $origin_main does not contain it; reconcile deliberately" >&2
+    exit 2
   }
+  bump_parent="$(git rev-parse "$bump_commit^1")"
+  if [[ "$origin_main" == "$bump_parent" ]]; then
+    target="$bump_commit"
+  elif git merge-base --is-ancestor "$bump_parent" "$origin_main" &&
+       range_only_issues "$bump_parent" "$origin_main"; then
+    tree="$(git merge-tree --write-tree "$bump_commit" "$origin_main")" || {
+      echo "issue-only commits on origin/main conflict with bump commit $bump_commit; reconcile deliberately" >&2
+      exit 1
+    }
+    target="$(git commit-tree "$tree" -p "$bump_commit" -p "$origin_main" \
+      -m "Merge issue-only intake into release $tag")"
+    range_only_issues "$bump_commit" "$target" || {
+      echo "intake merge $target changes more than issues/ relative to $bump_commit" >&2
+      exit 2
+    }
+    echo "origin/main gained issue-only commits during the release; main becomes intake merge $target over bump commit $bump_commit" >&2
+  else
+    echo "origin/main moved to $origin_main during the release with changes outside issues/; reconcile deliberately" >&2
+    exit 1
+  fi
   if [[ "$base" != "$bump_commit" ]]; then
     git merge --ff-only "$bump_commit"
   fi
   validate_bump_tree
-  if [[ "$origin_main" != "$bump_commit" ]]; then
-    # Explicitly disable follow-tags: the held local release tag must not ride the
-    # branch push before local validation. A normal non-force push rejects any concurrent move.
-    git -c push.followTags=false push origin HEAD:refs/heads/main
+  # Explicitly disable follow-tags: the held local release tag must not ride the
+  # branch push before local validation. A normal non-force push rejects any
+  # concurrent move. Local main moves past the bump commit only after the push,
+  # so a rejected push leaves a state a later resume can rebuild from.
+  git -c push.followTags=false push origin "$target:refs/heads/main"
+  if [[ "$target" != "$bump_commit" ]]; then
+    git merge --ff-only "$target"
   fi
+  main_commit="$target"
 }
 
 validate_exact_release_commit() {
   local sha="$1"
   [[ "$(git rev-parse HEAD)" == "$sha" ]] || {
-    echo "local HEAD is not the journalled bump commit $sha" >&2
+    echo "local HEAD is not the release main commit $sha" >&2
     exit 2
   }
   test -z "$(git status --porcelain --untracked-files=all)" || {
@@ -494,7 +574,7 @@ assert_recorded_checkpoint() {
 }
 
 resume_after_gate() {
-  local show_json remote_tag pushed_remote
+  local show_json remote_tag pushed_remote intake_rounds
   assert_run_may_resume "$run_id"
   show_json="$(show_run "$run_id")"
   branch="$(git symbolic-ref --quiet --short HEAD)" || { echo "release resume must run on a branch" >&2; exit 1; }
@@ -510,20 +590,32 @@ resume_after_gate() {
     assert_held_journal "$show_json"
     assert_recorded_checkpoint
     assert_remote_tag_absent
-    advance_main_to_bump
-    git fetch origin +refs/heads/main:refs/remotes/origin/main
-    [[ "$(git rev-parse HEAD)" == "$bump_commit" && "$(git rev-parse refs/remotes/origin/main)" == "$bump_commit" ]] || {
-      echo "local and remote main must both equal journalled bump commit $bump_commit" >&2
-      exit 1
-    }
-    validate_bump_tree
-    validate_exact_release_commit "$bump_commit"
-    git fetch origin +refs/heads/main:refs/remotes/origin/main
-    [[ "$(git rev-parse HEAD)" == "$bump_commit" &&
-       "$(git rev-parse refs/remotes/origin/main)" == "$bump_commit" ]] || {
-      echo "local or remote main advanced after exact-commit local validation; release $run_id remains untagged" >&2
-      exit 1
-    }
+    # Issue-only intake that lands during the long local gate is merged and the
+    # result validated again; a bounded number of rounds keeps a busy intake
+    # stream from holding the cut open indefinitely.
+    intake_rounds=3
+    while true; do
+      advance_main_to_bump
+      git fetch origin +refs/heads/main:refs/remotes/origin/main
+      [[ "$(git rev-parse HEAD)" == "$main_commit" && "$(git rev-parse refs/remotes/origin/main)" == "$main_commit" ]] || {
+        echo "local and remote main must both equal release main commit $main_commit" >&2
+        exit 1
+      }
+      validate_bump_tree
+      validate_exact_release_commit "$main_commit"
+      git fetch origin +refs/heads/main:refs/remotes/origin/main
+      [[ "$(git rev-parse HEAD)" == "$main_commit" ]] || {
+        echo "local main advanced after exact-commit local validation; release $run_id remains untagged" >&2
+        exit 1
+      }
+      [[ "$(git rev-parse refs/remotes/origin/main)" != "$main_commit" ]] || break
+      intake_rounds=$((intake_rounds - 1))
+      (( intake_rounds > 0 )) || {
+        echo "remote main kept advancing after exact-commit local validation; release $run_id remains untagged" >&2
+        exit 1
+      }
+      echo "remote main advanced during exact-commit local validation; re-checking it" >&2
+    done
     test -z "$(git status --porcelain --untracked-files=all)" || {
       echo "working tree changed after exact-commit local validation" >&2
       exit 2

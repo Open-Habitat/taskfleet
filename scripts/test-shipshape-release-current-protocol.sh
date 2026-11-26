@@ -385,6 +385,103 @@ jq -e --arg tag "$tag" '
 test -z "$(git -C "$tmp/repo" ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
 test -s "$tmp/repo/.git/shipshape-held-tags/$run_id.json"
 
+# Intake filings land on main while a cut is held. Rewind the disposable
+# origin to the pre-bump state the cut started from and replay that race through
+# the wrapper's resume: commits touching only issues/ are merged with the bump
+# commit and the merge is validated; any other change is refused before
+# validation. The release tag stays on the journalled bump commit throughout.
+bump_parent="$(git -C "$tmp/repo" rev-parse "$bump_commit^1")"
+git clone -q "$tmp/origin.git" "$tmp/intake"
+git -C "$tmp/intake" config user.name intake-test
+git -C "$tmp/intake" config user.email intake-test@example.invalid
+# Point fixture origin main at a new commit on <parent> that touches <path>.
+fixture_origin_commit() {
+  local parent="$1" path="$2"
+  git -C "$tmp/intake" fetch -q origin '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$tmp/intake" checkout -q --detach "$parent"
+  mkdir -p "$tmp/intake/$(dirname "$path")"
+  printf 'fixture %s\n' "$path" >>"$tmp/intake/$path"
+  git -C "$tmp/intake" add "$path"
+  git -C "$tmp/intake" commit -qm "fixture: change $path"
+  git -C "$tmp/intake" push -q -f origin HEAD:refs/heads/main
+  git -C "$tmp/intake" rev-parse HEAD
+}
+wrapper_resume() {
+  set +e
+  (
+    cd "$tmp/repo"
+    "${run_env[@]}" ./scripts/shipshape-release.sh resume "$run_id"
+  ) >"$tmp/intake-resume.stdout" 2>"$tmp/intake-resume.stderr"
+  intake_status=$?
+  set -e
+}
+assert_refused_outside_issues() {
+  local origin_tip="$1" validations
+  validations="$(wc -l <"$tmp/local-validation.log")"
+  wrapper_resume
+  [[ "$intake_status" -eq 1 ]] &&
+    grep -F 'with changes outside issues/; reconcile deliberately' "$tmp/intake-resume.stderr" >/dev/null || {
+    echo "wrapper did not refuse a non-issue commit on origin/main (status=$intake_status)" >&2
+    cat "$tmp/intake-resume.stderr" >&2
+    exit 1
+  }
+  [[ "$(wc -l <"$tmp/local-validation.log")" == "$validations" ]] || {
+    echo "a non-issue commit on origin/main reached local validation" >&2
+    exit 1
+  }
+  [[ "$(git --git-dir="$tmp/origin.git" rev-parse refs/heads/main)" == "$origin_tip" ]] || {
+    echo "wrapper moved origin/main after refusing a non-issue commit" >&2
+    exit 1
+  }
+}
+assert_validated_main() {
+  local expected="$1"
+  [[ "$intake_status" -eq 1 ]] &&
+    grep -F reached-exact-commit-local-validation "$tmp/intake-resume.stderr" >/dev/null || {
+    echo "issue-only intake did not reach exact-commit local validation (status=$intake_status)" >&2
+    cat "$tmp/intake-resume.stderr" >&2
+    exit 1
+  }
+  [[ "$(tail -n 1 "$tmp/local-validation.log")" == "$expected" &&
+     "$(git -C "$tmp/repo" rev-parse HEAD)" == "$expected" &&
+     "$(git --git-dir="$tmp/origin.git" rev-parse refs/heads/main)" == "$expected" ]] || {
+    echo "local validation, local main and origin main disagree on the release main $expected" >&2
+    exit 1
+  }
+  [[ -z "$(git -C "$tmp/repo" diff --name-only "$bump_commit" "$expected" -- . ':!issues')" ]] || {
+    echo "validated release main differs from the bump commit outside issues/" >&2
+    exit 1
+  }
+  [[ "$(git -C "$tmp/repo" rev-parse "$tag^{commit}")" == "$bump_commit" ]] &&
+    test -z "$(git -C "$tmp/repo" ls-remote --tags origin "refs/tags/$tag")" || {
+    echo "intake handling moved or published the held release tag" >&2
+    exit 1
+  }
+}
+
+code_tip="$(fixture_origin_commit "$bump_parent" fixture-code-change.txt)"
+assert_refused_outside_issues "$code_tip"
+[[ "$(git -C "$tmp/repo" rev-parse HEAD)" == "$bump_commit" ]]
+
+intake_tip="$(fixture_origin_commit "$bump_parent" issues/intake-probe/item.md)"
+wrapper_resume
+intake_merge="$(git --git-dir="$tmp/origin.git" rev-parse refs/heads/main)"
+assert_validated_main "$intake_merge"
+[[ "$(git -C "$tmp/repo" rev-parse "$intake_merge^1")" == "$bump_commit" &&
+   "$(git -C "$tmp/repo" rev-parse "$intake_merge^2")" == "$intake_tip" ]] || {
+  echo "issue-only intake was not merged with the journalled bump commit" >&2
+  exit 1
+}
+
+# Intake arriving after the merge was pushed is adopted on top of it.
+later_tip="$(fixture_origin_commit "$intake_merge" issues/intake-probe-2/item.md)"
+wrapper_resume
+assert_validated_main "$later_tip"
+
+code_tip="$(fixture_origin_commit "$later_tip" fixture-code-change.txt)"
+assert_refused_outside_issues "$code_tip"
+git --git-dir="$tmp/origin.git" update-ref refs/heads/main "$later_tip" "$code_tip"
+
 # Exercise the actual 0.12.3 resume JSONL and verify envelope after the safe
 # boundary. The release tag is pushed only to the local bare origin. Controlled
 # failed workflow observations stop verify immediately, without registry/network
