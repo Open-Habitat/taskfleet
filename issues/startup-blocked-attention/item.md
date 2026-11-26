@@ -1,11 +1,13 @@
 ---
 created: 2026-11-14
-updated: 2026-11-14
+updated: 2026-11-26
 type: feature
-status: untriaged
+status: open
 priority: normal
 provenance: other
 source_ref: open-habitat:taskfleet-worker-trust-prompt
+lane: worker-startup
+lane_seq: 2
 ---
 
 # Wake the parent when a live worker never reaches its first turn (startup_blocked)

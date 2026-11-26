@@ -1,12 +1,14 @@
 ---
 created: 2026-10-25
-updated: 2026-10-25
+updated: 2026-11-26
 type: bug
 reporter: jari
-status: untriaged
+status: obsolete
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:oh-conductor-2026-10-25-await-text
+closed: 2026-11-26
+disposition_note: 'v0.21.0 added the explicit signal the analysis asked for: workers ask with node ask, which settles run wait. Reopen if a 0.21.0 worker still asks only in plain text.'
 ---
 
 # run wait does not flag a Claude worker waiting on a plain-text question
@@ -40,3 +42,9 @@ Reported by jari via agent:homebase-wrapup.
 
 **Validation for a future change:** Exercise a plain-text human handoff with a still-live Claude process and no telemetry; assert that the chosen explicit signal opens one durable input generation and ordinary wait settles after its grace. Also retain negative coverage for background-task idle/Stop, duplicate events, stale attempts and foreign sessions, plus clearing only the matching generation and terminal-only wait behavior. No code, tracker disposition, or scheduling fields were changed by this analysis.
 <!-- intakectl:analysis:end job:1dd2dae4-9b84-4b44-8a0c-65e852758078 generation:0 -->
+
+## Comments
+
+### 2026-11-26T05:33:53Z · @intake
+
+Obsolete: v0.21.0 added the explicit signal the analysis asked for: workers ask with node ask, which settles run wait. Reopen if a 0.21.0 worker still asks only in plain text.

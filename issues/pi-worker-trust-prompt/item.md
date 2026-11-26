@@ -1,15 +1,17 @@
 ---
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-11-26
 type: bug
 reporter: agent
-status: untriaged
+status: open
 priority: normal
 provenance: other
 provenance_detail: open-habitat worker run (Jari's test-server finding 28.10.)
 source_ref: taskfleet:01m64kqx0vavm1pnwjnjf60dyn/headless-pi-worker-trust-prompt
 originating_run: 01m64kqx0vavm1pnwjnjf60dyn
 originating_run_kind: spinoff
+lane: worker-startup
+lane_seq: 1
 ---
 
 # Unattended Pi worker stops at Pi's project trust prompt in its new worktree

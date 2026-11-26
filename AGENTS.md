@@ -464,6 +464,18 @@ merge`, or supervisor cleanup. What follows is what each one protects.
    round (`RoundWaiting`), and only `run merge`, `run land`, and the
    fail-closed idle expiry ever touch a resident's branch or worktree.
 
+**A projection field with safety meaning bumps the state schema.** Core
+projections (`Manifest`, `Node`, `MergeTxn`) are typed serde structs without a
+catch-all map, so a writer drops fields it does not know and rewrites the
+struct wholesale. `run upgrade-lock --allow-live-runs` admits older
+supervisors beside a newer CLI when both report the same
+`STATE_SCHEMA_VERSION`, and such an older writer silently erases a newer
+field. An optional field whose loss only falls back to older behaviour for the
+rest of a live run may be added within a schema; a field that a safety
+decision depends on (identity, fencing, merge or teardown authority) must
+bump `STATE_SCHEMA_VERSION`, so the upgrade gate refuses the mixed fleet
+instead of letting the old writer undo it.
+
 ## Conventions the bundled skills depend on
 
 - Worker reports go to `/tmp/node-report-${run_id}.json`. A shared

@@ -1,12 +1,13 @@
 ---
 created: 2026-10-25
-updated: 2026-10-25
+updated: 2026-11-26
 type: feature
 reporter: jari
-status: untriaged
+status: open
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:wrapup-20261025-release-race
+lane: release
 ---
 
 # release wrapper aborts cut when issue-only intake commits land on main

@@ -1,8 +1,8 @@
 ---
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-11-26
 type: improvement
-status: untriaged
+status: wontfix
 priority: normal
 provenance: ai-review
 source_ref: taskfleet:01m5yjwkbgynhfd72zk1enhvpn/review-finding:sha1:6c6b2bca9c24e562507681ef7011d58a649c9988
@@ -17,6 +17,9 @@ review_confidence: HIGH
 labels:
 - ai-review-model:gpt-6-astra
 - ai-review-model:claude-fable-5-1
+closed: 2026-11-26
+disposition_note: Loss only falls back to older behaviour for a live run; the rule that a safety-relevant field bumps STATE_SCHEMA_VERSION is now in AGENTS.md. Reopen if such a field is added within a schema.
+disposition_reason: wontfix
 ---
 
 # Same-schema older writers drop newer projection fields during live-run upgrades
@@ -61,3 +64,9 @@ Currently documented as a residual in `docs/UPGRADE-ADMISSION.md`.
 
 Found by an AI review of the upgrade-lock operator overrides (finder
 gpt-6-astra, verified by claude-fable-5-1 and local code reading).
+
+## Comments
+
+### 2026-11-26T05:33:53Z · @intake
+
+Rejected (wontfix): Loss only falls back to older behaviour for a live run; the rule that a safety-relevant field bumps STATE_SCHEMA_VERSION is now in AGENTS.md. Reopen if such a field is added within a schema.

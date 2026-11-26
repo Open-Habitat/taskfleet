@@ -1,11 +1,12 @@
 ---
 created: 2026-11-13
-updated: 2026-11-13
+updated: 2026-11-26
 type: bug
-status: untriaged
+status: open
 priority: normal
 provenance: chat
 source_ref: conductor:2026-11-13/open-habitat-gate-worktree
+lane: worktree-lifecycle
 ---
 
 # Spinoff teardown removed a foreign worktree's registration (.git/worktrees deleted)
