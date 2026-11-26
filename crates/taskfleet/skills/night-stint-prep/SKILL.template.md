@@ -61,6 +61,27 @@ capability blocks completion and is disclosed, never claimed as run. Do not
 install tools, change another user's configuration, or publish artifacts merely
 to satisfy a skill reference.
 
+## Narrative root and product root
+
+Some projects keep the `TODO.md` narrative in a private narrative root (your
+cwd) and the code, the issuectl tracker, and the worker source in a separate
+public product root; `/stint-start` describes the split. A project is split
+only when its narrative-root instructions or handoff, or the user, name the
+product root as an absolute path and source branch; otherwise both are the
+same directory and nothing here changes.
+
+In a split project you read the product's issues and live DAG with
+`issuectl --root <product>`, check that the product checkout is clean and
+current, and write the handoff in the narrative root. Any scheduling change the
+user accepted is applied in the product through `issuectl --root <product>` and
+committed there by exact path. Make sure the handoff names the product root and
+its source branch, because the overnight conductor has only the repository to
+go on, and a conductor that cannot find the product would spawn from the
+narrative root. If the wave should let workers leave private notes under
+`<narrative root>/worker-results/<full-run-id>/`, say so and what belongs
+there, so the conductor can grant it in each brief and reconcile those notes in
+the morning report.
+
 ## Without issuectl: prepare accepted tasks, not a private schedule
 
 If the optional repository tracker is not enabled, use this path instead of

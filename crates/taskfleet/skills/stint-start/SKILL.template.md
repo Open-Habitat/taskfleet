@@ -127,6 +127,68 @@ capability blocks completion and is disclosed, never claimed as run. Do not
 install tools, change another user's configuration, or publish artifacts merely
 to satisfy a skill reference.
 
+## Narrative root and product root
+
+Most projects are one repository: the `TODO.md` narrative, the issue tracker,
+and the code workers change all live in the checkout you started in, and
+everything in this skill reads that way. Some projects split the maintainer
+workflow from the product. A private **narrative root** (your cwd) holds the
+handoff, trial notes, and private per-run output; a public **product root**
+holds the code, the issuectl tracker and its DAG, and is the source every
+worker branches from and merges back into. The split exists so that private
+conductor material never enters the public history, and it needs nothing from
+the binaries: `issuectl --root <product>` and `taskfleet run create
+--source-repo <product> --source-branch <branch>` already work from another
+cwd. What changes is which directory each fact comes from.
+
+A project is split only when its narrative-root instructions or handoff name
+the product root, or the user does, as an absolute path with its source
+branch. Without such a statement the two roots are the same directory and
+nothing below changes. Do not infer a product root from a sibling checkout, a
+remote, or a similar name: a wrong guess would spawn workers into, and file
+issues against, the wrong repository.
+
+In a split project, everything about the product is read from and done in the
+product root, and cwd chooses nothing:
+
+- The tracker probe and every issuectl call target the product:
+  `issuectl --root <product> dag --json --reservations <holds>`, and an
+  `issuectl:<slug>` or bare slug resolves against the product's tracker.
+- The source branch you bring current and clean, the green gate you rerun
+  after landings, landing checks by content, and the deploy all belong to
+  the product checkout. The narrative root needs only to be clean enough for
+  your own handoff commits.
+- Every spawn passes `--source-repo <absolute product root> --source-branch
+  <branch>` explicitly, and reservations come from `run list --repo <product
+  root>`. A worker launched without them branches from the narrative root and
+  would merge product work into private history. A driver run (`/fan-out`)
+  works inside its product worktree, so its children branch from the product
+  too; a brief that tells a driver where to spawn names the product root,
+  never the narrative root.
+
+The worker's side does not change. It updates and closes the product issue,
+files any new issue through the generated intake policy (unlaned, with
+provenance) in the product, uses its full run id, and lands with its single
+`run merge` into the product source branch. The generated run context is not
+yours to alter. The brief copy `run create` places under `history/.worktree/`
+in the worker's product worktree stays private only because the product
+ignores `history/`; keep the brief on that path and never weaken that ignore
+rule.
+
+A brief may permit a worker to write private output, such as trial notes or
+material that must not reach the public repository, under
+`<narrative root>/worker-results/<full-run-id>/` and nowhere else in the
+narrative root. The worker never stages or commits there: the narrative root is
+your repository, and a worker commit in it would race your handoff. After a
+run's product landing is verified, read its directory and commit it by
+explicit paths. The full run id in the path is what makes this recoverable: if
+the round is interrupted after a run landed in the product but before its
+notes were committed, the next conductor reconciles that directory from its
+recorded run id (`run show` for `landed`, product git for the content) and
+commits it, rather than re-running work that already landed. A directory whose
+run did not land is preserved work like any other and waits for a recovery
+decision.
+
 ## Without issuectl: a bounded serial round
 
 If the optional repository tracker is not enabled, use this path instead of

@@ -11,6 +11,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The conductor skills (`stint-start`, `stint-handoff`, `night-stint-prep`, and the brief-building part of `worktree-spinoff`) support a project that keeps its `TODO.md` narrative in a private repository and its code, issuectl tracker and worker source in a separate product repository (`conductor-separate-product-root`). When the project names the product root, the conductor reads the DAG and resolves issues with `issuectl --root <product>`, spawns with `--source-repo <product> --source-branch <branch>`, may let a worker leave private notes under `<narrative root>/worker-results/<full-run-id>/`, which the conductor commits after verifying the product landing, and reconciles such notes after an interruption from the run id instead of re-running the work. Single-repository projects are unchanged.
+
 ### Fixed
 
 - `run salvage` no longer leaves the preserved worktree mid-rebase when rebasing

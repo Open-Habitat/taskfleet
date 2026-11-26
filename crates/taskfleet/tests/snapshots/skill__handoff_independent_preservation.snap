@@ -1,5 +1,6 @@
 ---
 source: crates/taskfleet/tests/skill.rs
+assertion_line: 1881
 expression: preservation
 ---
 
@@ -22,3 +23,31 @@ its absence alone does not block saving the session. Report session preservation
 resource settlement, and schedule verification separately, with unresolved run
 ids, failures, skipped actions, and the next authorized recovery action. Never
 claim all resources settled or the schedule valid without evidence.
+
+## Narrative root and product root
+
+Some projects keep the handoff in a private narrative root (your cwd) and the
+code, the issuectl tracker, and the worker source in a separate public product
+root; `/stint-start` describes the split and why it exists. A project is split
+only when its narrative-root instructions or handoff, or the user, name the
+product root as an absolute path; otherwise both are the same directory and
+nothing here changes.
+
+In a split project the handoff, private decision records, and lessons about
+the conductor workflow are committed in the narrative root. Everything you
+check about the product is read in the product root: landing by content in
+product git, the foreign-run list as `run list --repo <product root>`, and the
+schedule as `issuectl --root <product> dag --json --reservations <holds>`. An
+answer that belongs to a product issue goes there through `issuectl --root
+<product>`, since that is where the next round reads it, and is committed in
+the product by exact path; nothing private goes into the product.
+
+An owned run may have left private output under
+`<narrative root>/worker-results/<full-run-id>/`. Once that run's product
+landing is verified, commit its directory by explicit paths, in its own commit
+before the handoff commit so the handoff commit stays exactly the handoff
+files. This is also how a handoff after an interruption reconciles a run that
+landed while its notes were left uncommitted: from the run id in the path, not
+by asking for the work again. A directory whose run did not land is preserved
+work; leave it uncommitted and untouched, name it with its run id in the
+narrative, and report that the narrative root is therefore not clean.

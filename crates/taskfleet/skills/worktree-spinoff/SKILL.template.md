@@ -269,6 +269,28 @@ are set you are in driver mode: skip issue detection and the issue-closing
 contract below, because a driver fanning out N children from one issue would
 otherwise have that issue updated and closed N times.
 
+### A caller in a separate narrative root
+
+A conductor (`/stint-start`) may work from a private narrative root while the
+code, the issuectl tracker, and the worker source live in a separate product
+root named by the project's instructions or the user. Then cwd must not choose
+anything about the run. Resolve the issue against the product
+(`issuectl --root <product> show <slug> --json`), run the capability probe
+against the product's `issues/`, take the source branch from the product
+checkout, and create the run with `--source-repo <absolute product root>
+--source-branch <branch>`, which places the worker and its merge in the
+product. The worker's issue lifecycle, filing policy, full run id, and single
+`run merge` are exactly as below; it works in a product worktree, so its
+`issuectl` calls need no `--root`. If the caller permits private output, the
+brief names the one place for it, `<narrative root>/worker-results/` plus the
+worker's own full run id from its generated run context (the id does not exist
+yet when you write the brief), says the worker writes there but never stages or
+commits, and leaves reconciliation to the caller after the product landing.
+The brief's copy in the worker's `history/.worktree/` stays out of product
+history only through the product's ignore rule, so do not move it or weaken
+that rule. Without a named product root, the checkout you are in is the product
+and nothing here applies.
+
 ## The brief
 
 `run create` prepends generated run context to every worker prompt, including a
