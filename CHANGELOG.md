@@ -12,6 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 ### Fixed
+
+- `run salvage` no longer leaves the preserved worktree mid-rebase when rebasing
+  onto the source conflicts. It aborts the rebase it started, leaves the branch
+  at its original tip, and the `merge_failed` error (with `details.rebase`)
+  says what happened and how to rebase and re-run the salvage. `run merge` for
+  a live worker still leaves the conflict in the checkout for the worker.
 <!-- oss-changelog:unreleased-end -->
 
 ## [0.21.1] - 2026-11-26

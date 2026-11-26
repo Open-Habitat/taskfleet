@@ -187,6 +187,65 @@ fn attention_required_run_is_finished() {
     assert_eq!(reports[0]["data"]["success"], true);
 }
 
+/// A rebase conflict during salvage aborts the rebase salvage started: the
+/// preserved branch and worktree are left exactly as found (no half-rebased
+/// checkout for a harvester to trip over), and the error says how to resume.
+#[test]
+fn rebase_conflict_aborts_and_leaves_branch_as_found() {
+    let home = TempDir::new().unwrap();
+    let gitroot = TempDir::new().unwrap();
+    let (repo, worktree) = repo_with_worker(gitroot.path());
+    std::fs::write(repo.join("tracked.txt"), "source\n").unwrap();
+    git(&repo, &["commit", "-qam", "source edit"]);
+    std::fs::write(worktree.join("tracked.txt"), "worker\n").unwrap();
+    git(&worktree, &["commit", "-qam", "worker edit"]);
+    let main_before = git(&repo, &["rev-parse", "main"]);
+    let branch_before = git(&worktree, &["rev-parse", "wt/dry"]);
+    let run_id = fresh_run_id();
+    let paths = seed_run(home.path(), &run_id);
+    add_worker_node(&paths, Some(&worktree), Some("wt/dry"), json!({}));
+    record_clean_exit(&paths);
+
+    let err = salvage_err(bin(&home).args([
+        "--output", "json", "run", "salvage", &run_id, "--source", "main",
+    ]));
+    assert_eq!(err["error"]["code"], "merge_failed", "{err}");
+    let details = &err["error"]["details"];
+    assert_eq!(details["rebase"], "aborted", "{err}");
+    assert_eq!(details["branch"], "wt/dry");
+    assert_eq!(details["source"], "main");
+    let msg = err["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("was aborted"), "{msg}");
+    assert!(msg.contains("git rebase main"), "{msg}");
+    assert!(
+        msg.contains(&format!("taskfleet run salvage {run_id}")),
+        "{msg}"
+    );
+
+    // Branch, HEAD and tree are as salvage found them.
+    assert_eq!(git(&worktree, &["rev-parse", "wt/dry"]), branch_before);
+    assert_eq!(
+        String::from_utf8(git(&worktree, &["symbolic-ref", "--short", "HEAD"])).unwrap(),
+        "wt/dry\n"
+    );
+    assert!(git(&worktree, &["status", "--porcelain"]).is_empty());
+    for name in ["rebase-merge", "rebase-apply"] {
+        let p = git(
+            &worktree,
+            &["rev-parse", "--path-format=absolute", "--git-path", name],
+        );
+        let p = String::from_utf8(p).unwrap();
+        assert!(!Path::new(p.trim()).exists(), "{name} left behind");
+    }
+    assert_eq!(git(&repo, &["rev-parse", "main"]), main_before);
+    assert!(
+        !read_events(&paths)
+            .iter()
+            .any(|e| e["kind"] == "node.report"),
+        "a failed salvage submits no report"
+    );
+}
+
 /// `--dry-run` reports the plan (worker state, no fence, planned merge) and
 /// appends NOTHING — no merge, no report.
 #[test]

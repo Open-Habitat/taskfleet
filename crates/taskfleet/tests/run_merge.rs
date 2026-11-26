@@ -1409,6 +1409,26 @@ fn rust_driver_conflict_preserves_unmerged_work() {
         node_reports(&run_dir(&home, &run_id).join("events.jsonl")).len(),
         0
     );
+    // A live worker's conflict stays in its checkout for it to resolve; only
+    // `run salvage` aborts the rebase it started.
+    let rebase_dir = Command::new("git")
+        .current_dir(&wt)
+        .args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "rebase-merge",
+        ])
+        .output()
+        .unwrap();
+    let rebase_dir = String::from_utf8(rebase_dir.stdout).unwrap();
+    assert!(
+        Path::new(rebase_dir.trim()).exists(),
+        "run merge must leave the conflicted rebase for the worker"
+    );
+    assert!(err["error"]
+        .get("details")
+        .is_none_or(|d| d.get("rebase").is_none()));
 }
 
 /// The recorded source OID is checked after the merge lock: a writer moving

@@ -26,7 +26,9 @@ use taskfleet_core::{append_and_apply_event, NodeId};
 
 use crate::error::CliError;
 use crate::output::{self, OutputFormat, OutputSpec};
-use crate::run::merge::{abort_merge_start, merge_failed, record_merge_start, run_git_merge};
+use crate::run::merge::{
+    abort_merge_start, merge_failed, record_merge_start, run_git_merge, OnRebaseConflict,
+};
 use crate::run::resident::{self, ResidentLock};
 use crate::run::{merge_recovery, parse_node_id};
 use crate::supervise::cleanup::git_bin;
@@ -233,6 +235,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         &branch,
         Some(&source),
         Some(&start.expected_source_oid),
+        OnRebaseConflict::LeaveForWorker,
         || Ok(()),
         |oid| {
             let _ = integrated.set(oid.to_string());

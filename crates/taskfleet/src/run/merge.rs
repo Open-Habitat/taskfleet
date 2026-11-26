@@ -41,7 +41,10 @@
 //!
 //! On a merge failure (conflicts, dirty tree, lock timeout) the report is
 //! NOT submitted — the node stays live so the agent can recover (e.g.
-//! `/complex-rebase`) and re-run `run merge`.
+//! `/complex-rebase`) and re-run `run merge`. A live worker's rebase conflict
+//! is left in its checkout for it to resolve; `run salvage` has no worker to
+//! hand the conflict to, so it aborts the rebase it started instead
+//! ([`OnRebaseConflict`]).
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -348,6 +351,11 @@ fn run_caller(
         None,
         salvage,
     )?;
+    let on_conflict = if salvage {
+        OnRebaseConflict::Abort
+    } else {
+        OnRebaseConflict::LeaveForWorker
+    };
     let recovery_command = format!(
         "taskfleet run merge {} --node-id {} --settlement-key '{}' --actor '{}'",
         run_id,
@@ -387,7 +395,13 @@ fn run_caller(
             })
             .map_err(from_core)?;
         if retry_fresh {
-            execute_caller_merge(paths, &node_id, key, args.report_file.as_deref())?;
+            execute_caller_merge(
+                paths,
+                &node_id,
+                key,
+                args.report_file.as_deref(),
+                on_conflict,
+            )?;
         } else if merge_recovery::verified_caller_transaction(paths, &node_id, &intent, true)
             .is_none()
         {
@@ -404,9 +418,28 @@ fn run_caller(
                 CliError::user("merge_recovery_unverifiable", "caller report event missing")
             })?
     } else {
-        match execute_caller_merge(paths, &node_id, key, args.report_file.as_deref()) {
+        match execute_caller_merge(
+            paths,
+            &node_id,
+            key,
+            args.report_file.as_deref(),
+            on_conflict,
+        ) {
             Ok(seq) => seq,
-            Err(e) => return Err(e.with_details(json!({"phase":"intent-recorded","intent_seq":intent.seq,"recovery_command":recovery_command}))),
+            Err(e) => {
+                // Keep any detail the merge already attached (e.g. the aborted
+                // rebase) beside the settlement phase.
+                let mut details = json!({"phase":"intent-recorded","intent_seq":intent.seq,"recovery_command":recovery_command});
+                if let (Some(prior), Some(map)) = (
+                    e.details.as_deref().and_then(Value::as_object),
+                    details.as_object_mut(),
+                ) {
+                    for (k, v) in prior {
+                        map.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+                return Err(e.with_details(details));
+            }
         }
     };
     let checkout = node
@@ -473,6 +506,16 @@ fn run_caller(
 /// emitting anything. `run` (this file) and `salvage::run` are the two callers:
 /// each renders the result into its own envelope.
 pub(crate) fn execute(args: &Args<'_>) -> Result<MergeOutcome, CliError> {
+    execute_with(args, OnRebaseConflict::LeaveForWorker)
+}
+
+/// [`execute`] for `run salvage`: a rebase conflict is aborted rather than left
+/// in the preserved worktree, because no worker is there to resolve it.
+pub(crate) fn execute_salvage(args: &Args<'_>) -> Result<MergeOutcome, CliError> {
+    execute_with(args, OnRebaseConflict::Abort)
+}
+
+fn execute_with(args: &Args<'_>, on_conflict: OnRebaseConflict) -> Result<MergeOutcome, CliError> {
     let run_id = args.run_id.clone();
     let node_id = parse_node_id(args.node_id.as_deref().unwrap_or(DEFAULT_NODE_ID))?;
     let source = match &args.source {
@@ -794,6 +837,7 @@ pub(crate) fn execute(args: &Args<'_>) -> Result<MergeOutcome, CliError> {
         branch,
         effective_source.as_deref(),
         merge_start.as_ref().map(|h| h.expected_source_oid.as_str()),
+        on_conflict,
         || Ok(()),
         |oid| {
             if let Some(start) = &merge_start {
@@ -1038,6 +1082,7 @@ fn execute_caller_merge(
     node_id: &NodeId,
     key: &str,
     report_file: Option<&Path>,
+    on_conflict: OnRebaseConflict,
 ) -> Result<u64, CliError> {
     let intent = RunLock::with_shared_lock(&paths.lock(), || {
         Ok(read_manifest_opt(paths)?.and_then(|m| m.caller_settlement_intent))
@@ -1121,6 +1166,7 @@ fn execute_caller_merge(
         branch,
         Some(source),
         Some(&start.expected_source_oid),
+        on_conflict,
         || authority.verify(&node, repo, source),
         |integrated_oid| {
             authority.verify(&node, repo, source)?;
@@ -1667,11 +1713,25 @@ fn git_output(git: &str, dir: &Path, args: &[&str], branch: &str) -> Result<Stri
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// What [`run_git_merge`] does when rebasing the worker branch stops on a
+/// conflict.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OnRebaseConflict {
+    /// Leave the rebase in progress: a live worker owns the checkout and
+    /// resolves the conflict before re-running `run merge`.
+    LeaveForWorker,
+    /// Abort the rebase this merge started and leave the branch as found. Used
+    /// by `run salvage`, where nobody is in the worktree to resolve it and a
+    /// half-rebased checkout would block anyone reading the preserved branch.
+    Abort,
+}
+
 pub(crate) fn run_git_merge(
     worktree_path: &Path,
     branch: &str,
     source: Option<&str>,
     expected_source_oid: Option<&str>,
+    on_conflict: OnRebaseConflict,
     before_mutation: impl Fn() -> Result<(), CliError>,
     before_ref_move: impl Fn(&str) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
@@ -1803,8 +1863,9 @@ pub(crate) fn run_git_merge(
     };
     check_source()?;
     // The previous backend rebased the worker then fast-forwarded
-    // the checked-out target. Git does the same operations here; conflicts leave
-    // the worker checkout for manual resolution and never submit a report.
+    // the checked-out target. Git does the same operations here; conflicts never
+    // submit a report, and `on_conflict` decides whether the stopped rebase is
+    // left for the worker or aborted.
     // An already integrated branch needs no rebase (idempotent retry).
     let worker_oid = merge_recovery::read_oid(&git, &target.path, branch)
         .ok_or_else(|| merge_failed(branch, "could not resolve worker branch"))?;
@@ -1812,7 +1873,25 @@ pub(crate) fn run_git_merge(
         .ok_or_else(|| merge_failed(branch, "could not resolve source branch"))?;
     if worker_oid != source_oid {
         before_mutation()?;
-        git_output(&git, worktree_path, &["rebase", "--", source], branch)?;
+        // Only a rebase this call started may be aborted, so note whether one
+        // was already in progress (the branch check above makes that unlikely).
+        let preexisting = rebase_in_progress(&git, worktree_path);
+        if let Err(e) = git_output(&git, worktree_path, &["rebase", "--", source], branch) {
+            if on_conflict == OnRebaseConflict::Abort
+                && !preexisting
+                && rebase_in_progress(&git, worktree_path)
+            {
+                return Err(abort_started_rebase(
+                    &git,
+                    worktree_path,
+                    branch,
+                    source,
+                    &worker_oid,
+                    e,
+                ));
+            }
+            return Err(e);
+        }
     }
     check_source()?;
     let integrated_oid = merge_recovery::read_oid(&git, &target.path, branch)
@@ -1831,6 +1910,72 @@ pub(crate) fn run_git_merge(
         branch,
     )?;
     Ok(())
+}
+
+fn rebase_in_progress(git: &str, worktree: &Path) -> bool {
+    ["rebase-merge", "rebase-apply"].iter().any(|name| {
+        git_output(
+            git,
+            worktree,
+            &["rev-parse", "--path-format=absolute", "--git-path", name],
+            "",
+        )
+        .is_ok_and(|p| Path::new(&p).exists())
+    })
+}
+
+/// Abort the rebase [`run_git_merge`] just started and turn the conflict into an
+/// error that says what happened and how to resume. If the abort cannot be
+/// verified (the branch is not back on its pre-rebase tip, or `--abort` itself
+/// failed), the error says the worktree is still mid-rebase instead.
+fn abort_started_rebase(
+    git: &str,
+    worktree: &Path,
+    branch: &str,
+    source: &str,
+    worker_oid: &str,
+    conflict: CliError,
+) -> CliError {
+    let wt = worktree.display();
+    let abort = git_output(git, worktree, &["rebase", "--abort"], branch);
+    let restored = abort.is_ok()
+        && !rebase_in_progress(git, worktree)
+        && Git::with_bin(git)
+            .head_branch(worktree.to_str().unwrap_or_default())
+            .as_deref()
+            == Some(branch)
+        && merge_recovery::read_oid(git, &worktree.to_string_lossy(), branch).as_deref()
+            == Some(worker_oid);
+    let (state, guidance) = if restored {
+        (
+            "aborted",
+            format!(
+                "the rebase onto '{source}' was aborted, so branch '{branch}' is back at                  {worker_oid} and worktree {wt} is as it was found. To finish the work,                  run `git rebase {source}` in that worktree, resolve the conflicts,                  `git rebase --continue`, then retry"
+            ),
+        )
+    } else {
+        let why = match &abort {
+            Err(e) => format!("`git rebase --abort` failed ({})", e.message),
+            Ok(_) => "the branch could not be verified back at its pre-rebase tip".to_string(),
+        };
+        (
+            "in-progress",
+            format!(
+                "{why}; worktree {wt} may still be mid-rebase. Inspect it, then either run                  `git rebase --abort` there to restore branch '{branch}' (it was at                  {worker_oid}) or resolve the conflicts and `git rebase --continue`,                  then retry"
+            ),
+        )
+    };
+    CliError {
+        message: format!("{} — {guidance}", conflict.message),
+        ..conflict
+    }
+    .with_details(json!({
+        "rebase": state,
+        "worktree": worktree.to_string_lossy(),
+        "branch": branch,
+        "source": source,
+        "branch_oid": worker_oid,
+    }))
 }
 
 fn emit(
@@ -2016,8 +2161,41 @@ mod caller_merge_tests {
             }
         }
         fn drive(&self, key: &str) -> Result<u64, CliError> {
-            execute_caller_merge(&self.paths, &self.node, key, None)
+            execute_caller_merge(
+                &self.paths,
+                &self.node,
+                key,
+                None,
+                OnRebaseConflict::LeaveForWorker,
+            )
         }
+    }
+    #[test]
+    fn caller_salvage_aborts_the_rebase_it_started_on_conflict() {
+        let f = Fixture::new();
+        fs::write(f.repo.join("change"), "source").unwrap();
+        git(&f.repo, &["add", "."]);
+        git(&f.repo, &["commit", "-m", "source"]);
+        let main = git(&f.repo, &["rev-parse", "main"]);
+        let worker = git(&f.repo, &["rev-parse", "wt/worker"]);
+        let err = execute_caller_merge(
+            &f.paths,
+            &f.node,
+            "merge-key",
+            None,
+            OnRebaseConflict::Abort,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "merge_failed", "{}", err.message);
+        assert_eq!(err.details.as_deref().unwrap()["rebase"], "aborted");
+        assert_eq!(git(&f.repo, &["rev-parse", "main"]), main);
+        assert_eq!(git(&f.checkout, &["rev-parse", "HEAD"]), worker);
+        assert_eq!(
+            git(&f.checkout, &["symbolic-ref", "--short", "HEAD"]),
+            "wt/worker"
+        );
+        assert!(!rebase_in_progress(&git_bin(), &f.checkout));
+        assert_eq!(git(&f.checkout, &["status", "--porcelain"]), "");
     }
     #[test]
     fn actual_caller_driver_records_linked_transaction_and_reports_only_under_lease() {
@@ -2251,7 +2429,14 @@ mod caller_merge_tests {
         };
         let paths = RunPaths::new(&root, "01jxsnap000000000000000000").unwrap();
         let node = NodeId::parse_str("n-0001").unwrap();
-        execute_caller_merge(&paths, &node, "merge-key", None).unwrap();
+        execute_caller_merge(
+            &paths,
+            &node,
+            "merge-key",
+            None,
+            OnRebaseConflict::LeaveForWorker,
+        )
+        .unwrap();
         panic!("crash injection did not fire");
     }
     #[test]

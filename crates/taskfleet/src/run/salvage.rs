@@ -38,6 +38,9 @@
 //!    every state-integrity invariant hold identically. Idempotent against a
 //!    duplicate merge (the merge path's crash-recovery + idempotency key), so a
 //!    re-run after a partial salvage completes cleanly.
+//!    One difference: a rebase conflict is aborted rather than left in the
+//!    worktree, since no worker is there to resolve it and a half-rebased
+//!    checkout would block anyone reading the preserved branch.
 //!
 //! ## Scope (0.2)
 //!
@@ -506,7 +509,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
     // reattach — so provenance and every state-integrity invariant hold. Our
     // fence note is seeded as the base warnings, so the merge's
     // `ensure_report_consumer` appends to the same list the envelope emits.
-    let mo = merge::execute(&merge::Args {
+    let mo = merge::execute_salvage(&merge::Args {
         run_id: run_id.clone(),
         source: args.source.clone(),
         node_id: None,
@@ -518,6 +521,14 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
         warnings: &base_warnings,
     })
     .map_err(|mut e| {
+        // A rebase conflict was aborted (or could not be): name the command
+        // that resumes the salvage once the branch is rebased.
+        if e.details
+            .as_deref()
+            .is_some_and(|d| d.get("rebase").is_some())
+        {
+            e.message = format!("{} with `taskfleet run salvage {run_id}`", e.message);
+        }
         // If the merge fails AFTER we fenced, the operator must know the worker
         // was already killed (the worktree is preserved — merge failures never
         // tear down). Without this the error reads as if salvage refused before
