@@ -2773,13 +2773,17 @@ fn respawn_agent(
         );
         &builtin_selection
     };
-    let agent_launcher = crate::run::spawn::write_agent_launcher(
+    let agent_launcher = crate::run::spawn::write_agent_launcher_with(
         &paths.root,
         state_root,
         selection,
         manifest.run_id.as_str(),
         node.node_id.as_str(),
         attempt,
+        &crate::run::spawn::LaunchOptions {
+            trust_source: source_repo.map(std::path::Path::to_path_buf),
+            ..Default::default()
+        },
     )?;
     let agent = Some(agent_launcher.path().to_str().ok_or_else(|| {
         CliError::system(

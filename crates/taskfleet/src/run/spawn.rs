@@ -145,6 +145,9 @@ pub fn builtin_agent_selection(harness: &str, autonomous: bool) -> taskfleet_cor
     }
 }
 
+/// [`write_agent_launcher_with`] with default options; tests only, because a
+/// production launch names its source checkout for Pi's project trust.
+#[cfg(test)]
 pub fn write_agent_launcher(
     run_dir: &Path,
     state_root: &Path,
@@ -181,6 +184,10 @@ pub struct LaunchOptions {
     /// Resident Pi only: the round marker the bundled adapter watches to shut
     /// Pi down at the next settled boundary after a round report.
     pub round_marker: Option<PathBuf>,
+    /// Pi only: the run's source checkout, whose trust-store decision the
+    /// worker inherits as `--approve` / `--no-approve`
+    /// ([`crate::harness::pi_trust`]).
+    pub trust_source: Option<PathBuf>,
 }
 
 /// [`write_agent_launcher`] with resident options: resume a recorded session
@@ -412,6 +419,21 @@ pub fn write_agent_launcher_with(
     } else {
         None
     };
+    // Pi's project trust prompt would be an unattended worker's first and last
+    // screen; pass the decision the person gave the source checkout.
+    let pi_trust = if pi_session.is_some() {
+        let trust = crate::harness::pi_trust::resolve(
+            &selected.command,
+            options.trust_source.as_deref(),
+            selection.interaction == "autonomous",
+        );
+        inner_body.extend_from_slice(b"# Pi project trust: ");
+        inner_body.extend_from_slice(trust.describe().as_bytes());
+        inner_body.push(b'\n');
+        trust
+    } else {
+        crate::harness::pi_trust::PiTrust::Unchanged
+    };
     inner_body.extend_from_slice(b"\nexec");
     for arg in &selected.command {
         inner_body.push(b' ');
@@ -439,6 +461,10 @@ pub fn write_agent_launcher_with(
     }
     if pi_session.is_some() {
         inner_body.extend_from_slice(b" --extension \"$TASKFLEET_MESSAGE_EXTENSION\"");
+        if let Some(flag) = pi_trust.flag() {
+            inner_body.push(b' ');
+            inner_body.extend_from_slice(flag.as_bytes());
+        }
     }
     if let Some((_, path)) = pi_session.as_ref() {
         inner_body.extend_from_slice(b" --session ");
@@ -1636,7 +1662,10 @@ pub(crate) mod tests {
         assert!(outer.contains("TASKFLEET_ATTEMPT TASKFLEET_CREATOR_SESSION\n"));
         assert!(inner.contains("--pi-session-id"));
         assert!(inner.contains("--pi-session-path"));
-        assert!(inner.contains("exec 'pi' --extension \"$TASKFLEET_MESSAGE_EXTENSION\" --session"));
+        // No source checkout is named: an autonomous worker never approves.
+        assert!(inner.contains(
+            "exec 'pi' --extension \"$TASKFLEET_MESSAGE_EXTENSION\" --no-approve --session"
+        ));
         assert!(inner.contains(&format!(
             "unset {TOKEN_ENV}\nexport TASKFLEET_MESSAGE_SOCKET="
         )));
@@ -1649,6 +1678,95 @@ pub(crate) mod tests {
             "same id binds helper and Pi path"
         );
         assert!(launcher.path().is_absolute());
+    }
+
+    #[test]
+    fn pi_launcher_inherits_the_source_checkout_trust_decision() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let run_dir = root.join("runs/01jxsnap000000000000000000");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let trusted = root.join("src/trusted");
+        let distrusted = root.join("src/distrusted");
+        let undecided = root.join("elsewhere/repo");
+        for dir in [&trusted, &distrusted, &undecided] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let agent_dir = root.join("pi-agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(
+            agent_dir.join("trust.json"),
+            serde_json::json!({
+                root.join("src").to_str().unwrap(): true,
+                distrusted.to_str().unwrap(): false,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let fake_self = root.join("taskfleet-test");
+        std::fs::write(&fake_self, "#!/bin/sh\nexit 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&fake_self, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let prior_self = std::env::var_os("TASKFLEET_TEST_SELF_EXE");
+        let prior_agent = std::env::var_os("PI_CODING_AGENT_DIR");
+        std::env::set_var("TASKFLEET_TEST_SELF_EXE", &fake_self);
+        std::env::set_var("PI_CODING_AGENT_DIR", &agent_dir);
+        let mut got = Vec::new();
+        for (source, autonomous) in [
+            (&trusted, true),
+            (&trusted, false),
+            (&distrusted, true),
+            (&distrusted, false),
+            (&undecided, true),
+            (&undecided, false),
+        ] {
+            let selection = builtin_agent_selection("pi", autonomous);
+            write_agent_launcher_with(
+                &run_dir,
+                &root,
+                &selection,
+                "01jxsnap000000000000000000",
+                "n-0001",
+                0,
+                &LaunchOptions {
+                    trust_source: Some(source.clone()),
+                    ..LaunchOptions::default()
+                },
+            )
+            .unwrap();
+            let inner =
+                std::fs::read_to_string(run_dir.join("candidate-launch-n-0001-attempt-0.sh"))
+                    .unwrap();
+            let exec = inner.lines().find(|l| l.starts_with("exec ")).unwrap();
+            got.push(if exec.contains(" --approve ") {
+                "approve"
+            } else if exec.contains(" --no-approve ") {
+                "no-approve"
+            } else {
+                "none"
+            });
+        }
+        for (key, prior) in [
+            ("TASKFLEET_TEST_SELF_EXE", prior_self),
+            ("PI_CODING_AGENT_DIR", prior_agent),
+        ] {
+            match prior {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        assert_eq!(
+            got,
+            [
+                "approve",
+                "approve",
+                "no-approve",
+                "no-approve",
+                "no-approve",
+                "none"
+            ]
+        );
     }
 
     #[test]

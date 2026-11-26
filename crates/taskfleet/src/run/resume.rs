@@ -368,6 +368,7 @@ pub(crate) fn resume(
         &LaunchOptions {
             resume: Some(session),
             round_marker: marker,
+            trust_source: Some(repo.clone()),
         },
     )?;
 

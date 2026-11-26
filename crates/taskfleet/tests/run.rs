@@ -228,8 +228,19 @@ default="local"
     .unwrap();
     std::fs::set_permissions(&hostile, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+    // The person trusts the source checkout in Pi's trust store; the worker
+    // inherits that decision as Pi's one-run `--approve`.
+    let source_checkout = home.path().parent().unwrap().canonicalize().unwrap();
+    std::fs::create_dir_all(home.path().join(".pi/agent")).unwrap();
+    std::fs::write(
+        home.path().join(".pi/agent/trust.json"),
+        serde_json::json!({ source_checkout.to_str().unwrap(): true }).to_string(),
+    )
+    .unwrap();
+
     let mut command = Command::new(env!("CARGO_BIN_EXE_taskfleet"));
     command
+        .env_remove("PI_CODING_AGENT_DIR")
         // Simulate an equipped developer shell. NativeSpawnTools must remove
         // this ambient placement so the explicit fixture session below is the
         // only placement contract the create can use.
@@ -296,14 +307,16 @@ default="local"
         )
     });
     let expected_prefix = format!(
-        "{run_id}\nn-0001\n0\nunset\nunset\n9\n{}\none two\nquote'arg\n--extension\n",
+        "{run_id}\nn-0001\n0\nunset\nunset\n10\n{}\none two\nquote'arg\n--extension\n",
         worker.display()
     );
     assert!(
         observed_bytes.starts_with(&expected_prefix),
         "observed={observed_bytes:?}"
     );
-    assert!(observed_bytes.contains(&format!("/.creating/message-{run_id}.ts\n--session\n")));
+    assert!(observed_bytes.contains(&format!(
+        "/.creating/message-{run_id}.ts\n--approve\n--session\n"
+    )));
     assert!(
         observed_bytes.contains(&format!("/.creating/pi-sessions/{run_id}/pi-session-")),
         "exact private session path reaches the selected Pi argv: {observed_bytes:?}"

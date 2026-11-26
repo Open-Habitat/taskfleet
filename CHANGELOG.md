@@ -20,6 +20,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a live worker still leaves the conflict in the checkout for the worker.
 
 - A failed `run create`, a resident's worktree recreation, and teardown no longer touch other worktrees in the same repository (`teardown-removes-foreign-worktree`). Creation rollback used `workmux remove` and resident resume ran `git worktree prune`; both prune every registration in the repository, so a manually added worktree whose checkout that process could not see (another mount namespace or private `/var/tmp`) lost its `.git/worktrees/` entry. Taskfleet now closes only its own window, removes its own worktree by exact path, and removes only its own `workmux.worktree.<handle>` config section. Teardown also removes that section, which used to accumulate one per landed run.
+
+- A Taskfleet-launched Pi worker no longer stops at Pi's project trust prompt in its fresh worktree (`pi-worker-trust-prompt`). The launcher passes Pi's one-run `--approve` or `--no-approve` carrying the decision Pi's trust store (`$PI_CODING_AGENT_DIR` or `~/.pi/agent/trust.json`, nearest entry) already holds for the run's source checkout, so a worker is never trusted beyond what was given to the same repository and nothing is written to the store. When the source has no decision, or the store cannot be read, an autonomous worker gets `--no-approve` and loads no project-local Pi resources; an interactive worker keeps Pi's own prompt. A trust flag in the profile's Pi argv stands unchanged. Initial launches, retries and resident rounds all apply it.
 <!-- oss-changelog:unreleased-end -->
 
 ## [0.21.1] - 2026-11-26

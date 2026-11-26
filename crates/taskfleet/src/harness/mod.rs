@@ -10,6 +10,8 @@
 //!   resolver for `--harness`.
 //! - [`prompt`] — the pi worker-prompt translation shim (Claude-Code-flavored
 //!   briefs → pi/CLI equivalents for the autonomous kinds pi supports).
+//! - [`pi_trust`] — the `--approve` / `--no-approve` decision a Pi worker
+//!   inherits from Pi's trust store entry for the run's source checkout.
 //! - [`KNOWN_HARNESSES`] / [`DEFAULT_HARNESS`] — the built-in registry and
 //!   default used when no executable profile is configured.
 //!
@@ -17,6 +19,7 @@
 //! conformance suite and the aider / claude-deepseek adapters) was cut in the
 //! 0.2 simplification; only the launcher survives.
 
+pub mod pi_trust;
 pub mod profile;
 pub mod prompt;
 pub mod select;

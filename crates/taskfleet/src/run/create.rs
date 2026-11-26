@@ -951,6 +951,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             round_marker: (resident_policy.is_some()
                 && launcher_selection.selected.harness == "pi")
                 .then(|| super::resident::round_marker_path(&root, &run_id, 0)),
+            trust_source: materialization_repo.as_deref().map(PathBuf::from),
         },
     )?;
     let agent_override = agent_launcher.path().to_str().ok_or_else(|| {
