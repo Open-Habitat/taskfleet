@@ -3,7 +3,7 @@ created: 2026-10-29
 updated: 2026-11-26
 type: bug
 reporter: agent
-status: open
+status: in-progress
 priority: normal
 provenance: other
 provenance_detail: open-habitat worker run (Jari's test-server finding 28.10.)
