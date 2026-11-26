@@ -351,6 +351,15 @@ pub struct RunSummary {
     /// Bounded observational counts of advisory samples by freshness state.
     /// Meaningful when `telemetry_available` is true; never affects lifecycle.
     pub telemetry_counts: crate::run::telemetry::TelemetryCounts,
+    /// Computed hint (never persisted): the live worker has not reached its
+    /// first turn within the startup grace, so it may be stopped at an
+    /// interactive startup prompt (see [`crate::run::startup`]). The remedy is
+    /// `run attach` to see the prompt, or `run cancel`. Never set together with
+    /// `attention_required`, `stalled`, an open request, or an open question.
+    pub startup_blocked: bool,
+    /// Context for [`Self::startup_blocked`]; omitted unless it is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub startup_blocked_detail: Option<crate::run::startup::StartupBlockedView>,
     /// Full question/options/default context, omitted when no request is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub awaiting_input_detail: Option<crate::run::awaiting_input::AwaitingInputView>,
@@ -492,6 +501,18 @@ impl RunSummary {
         self.awaiting_input_detail = awaiting;
         self
     }
+
+    /// Attach the startup-blocked hint. The caller computes it only when no
+    /// higher-precedence verdict holds.
+    #[must_use]
+    pub fn with_startup_blocked(
+        mut self,
+        detail: Option<crate::run::startup::StartupBlockedView>,
+    ) -> Self {
+        self.startup_blocked = detail.is_some();
+        self.startup_blocked_detail = detail;
+        self
+    }
 }
 
 impl From<&Manifest> for RunSummary {
@@ -521,6 +542,8 @@ impl From<&Manifest> for RunSummary {
             open_discussion_count: 0,
             telemetry_available: false,
             telemetry_counts: crate::run::telemetry::TelemetryCounts::default(),
+            startup_blocked: false,
+            startup_blocked_detail: None,
             awaiting_input_detail: None,
             open_ask: None,
             last_ask: None,
@@ -640,6 +663,7 @@ mod tests {
                 "attention_required": false,
                 "awaiting_input": false,
                 "open_discussion_count": 0,
+                "startup_blocked": false,
                 "telemetry_available": false,
                 "telemetry_counts": {
                     "absent": 0,

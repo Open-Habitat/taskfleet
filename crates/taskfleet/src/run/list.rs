@@ -246,6 +246,18 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 .as_ref()
                 .map_or_default(|n| crate::run::ask::views(m.run_id.as_str(), n, now));
             let worktree_path = default_node.as_ref().and_then(|n| n.worktree_path.clone());
+            // Startup-blocked (`crate::run::startup`): lowest precedence, and
+            // only while the supervisor is not confirmed dead (a dead one is a
+            // stall whose remedy is `run reattach`, not `run attach`).
+            let startup_blocked = diagnostic_node.and_then(|n| {
+                crate::run::startup::view(
+                    &paths,
+                    &m,
+                    n,
+                    attention.is_some() || stillborn || !supervisor.presumed_working(),
+                    now,
+                )
+            });
             Ok(Some((
                 m,
                 supervisor,
@@ -256,6 +268,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 transcripts,
                 resident,
                 ask_views,
+                startup_blocked,
             )))
         })
         .map_err(from_core)?;
@@ -269,6 +282,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             transcripts,
             resident,
             ask_views,
+            startup_blocked,
         ) = match scanned {
             Some(v) => v,
             None => continue, // half-initialized run dir; skip silently
@@ -290,6 +304,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             .with_attention(attention)
             .with_awaiting_input(awaiting_input)
             .with_ask(ask_views)
+            .with_startup_blocked(startup_blocked)
             .with_resident(resident);
         // Filter the exact DTO values while still avoiding telemetry I/O for
         // excluded rows.
@@ -473,6 +488,10 @@ fn emit(runs: Vec<RunSummary>, spec: &OutputSpec, warnings: &[String]) -> Result
                     // non-terminal run awaiting a manual finish, distinct from a
                     // dead-supervisor stall (design.md §2.5).
                     format!("{} (attention)", r.status)
+                } else if r.startup_blocked {
+                    // A live worker that never reached its first turn: likely
+                    // stopped at an interactive startup prompt (`run attach`).
+                    format!("{} (startup-blocked)", r.status)
                 } else {
                     r.status.clone()
                 };

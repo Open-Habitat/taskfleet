@@ -275,7 +275,10 @@ The driver brief is the whole operating manual of the batch. It contains:
   longer progress on its own. Waiting on it again returns immediately with the
   same answer, so take it out of the live set first. Its slot stays taken
   until it is resolved: a stalled supervisor is revived with
-  `run reattach <child-run-id>`; a child that exited cleanly without
+  `run reattach <child-run-id>`; a `startup_blocked` child never reached its
+  first turn (likely an interactive startup prompt) and is a failed attempt,
+  cancelled with `run cancel <child-run-id>` unless a person attaches with
+  `run attach <child-run-id>`; a child that exited cleanly without
   `run merge` is a failed attempt, cancelled with `run cancel <child-run-id>`
   so its branch is preserved; a child awaiting input in an autonomous batch
   has hit a brief gap, which is also a failed attempt. Only then does the

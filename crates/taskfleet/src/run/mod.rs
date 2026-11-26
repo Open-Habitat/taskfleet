@@ -33,6 +33,7 @@ pub mod session;
 pub mod show;
 pub mod spawn;
 pub mod stalled;
+pub mod startup;
 pub mod supervisor_readiness;
 pub mod supervisor_spawn;
 pub mod telemetry;
@@ -575,7 +576,8 @@ pub enum RunAction {
         #[arg(long, value_parser = wait::parse_check_in)]
         check_in: Option<Duration>,
         /// Wait only for terminal status, ignoring non-terminal attention signals
-        /// (including awaiting input and worker questions). Default wait still
+        /// (including awaiting input, worker questions, and a worker blocked
+        /// before its first turn, `startup_blocked`). Default wait still
         /// wakes for attention, and at once for an open `node ask` question
         /// (`asked: true`, `open_ask`): answer it with `run answer`.
         #[arg(long)]

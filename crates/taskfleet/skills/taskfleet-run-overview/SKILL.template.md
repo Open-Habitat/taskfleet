@@ -130,6 +130,7 @@ identically from both verbs.
   "attention_required": false,
   "awaiting_input": false,
   "open_discussion_count": 0,
+  "startup_blocked": false,
   "telemetry_available": true,
   "telemetry_counts": { ... }
 }
@@ -186,6 +187,16 @@ each has a different remedy:
   auto-answered. Existing runs, disabled hooks, auth/trust before session startup,
   and unsupported harness signals can remain unknown; use bounded check-ins.
   See `docs/CLAUDE-PROMPT-SIGNALS.md` for coverage and limitations.
+- `startup_blocked` — a live autonomous Pi worker passed its PID handshake but
+  has not reached its first turn within the startup grace (two minutes,
+  `TASKFLEET_STARTUP_BLOCKED_GRACE_SECS`): its native transcript still holds
+  only the header Taskfleet wrote. It is most likely stopped at an
+  interactive startup prompt (trust, a session selector, authentication).
+  `startup_blocked_detail` carries the attempt start, worker pid, and a
+  `resume_hint`. Remedy: `run attach <run-id>` to see and answer the prompt,
+  or `run cancel`. It is a read-time hint with the lowest precedence and
+  never appears beside the shapes above; Claude workers and resumed resident
+  rounds have no such signal, so its absence proves nothing.
 - `open_ask` — the worker asked its parent a blocking question with
   `taskfleet node ask` (ADR 0004) and waits for the answer; present only while
   one is open. It carries `ask_id`, `question`, `options`, the worker's
@@ -263,8 +274,8 @@ Waiting can cover several ids, so its shape differs from `run show`:
 `data.outcome` is `condition-met`, `timed-out`, or `check-in`, and per-run results are in
 `data.runs[]` (`run_id`, `status`, `merged`, `report_only`, `landed`,
 `landed_method`, `stalled`, `attention_required`, `awaiting_input`,
-`preserved_work`, plus `summary`, `error`, `attention`,
-`awaiting_input_detail`, `asked`, `open_ask`, `last_ask`, and
+`startup_blocked`, `preserved_work`, plus `summary`, `error`, `attention`,
+`awaiting_input_detail`, `startup_blocked_detail`, `asked`, `open_ask`, `last_ask`, and
 `recoverable_work` when present). There
 is no `data.status`; read the runs array. Read `outcome` first: `timed-out` is
 not completion, and the field is authoritative even when a pipeline swallowed
@@ -286,7 +297,10 @@ the parent environment and works with the same host-neutral waiting guidance abo
 
 A run *settles* the wait when it goes terminal or when it can no longer
 progress on its own: stalled, attention-required, or awaiting input past a
-short grace. An open worker question settles it at once, with no grace:
+short grace. A startup-blocked worker settles a default wait once a grace
+has passed since the later of the worker's start and the wait's own start,
+so waiting again after a wake does not return at once; it grades as an
+error under `--fail-on-error`. An open worker question settles it at once, with no grace:
 `asked: true` and `open_ask` say what to answer. That is not an error and
 never trips `--fail-on-error`; answer it (or escalate it) and wait again. An
 escalated or expired question does not settle the wait. A named resident run also settles, at once, when its worker

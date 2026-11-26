@@ -58,6 +58,7 @@ expression: value
       "clock_unreliable": 0,
       "invalid": 0
     },
+    "startup_blocked": false,
     "manifest": {
       "schema_version": 1,
       "run_id": "[RUN_ID]",

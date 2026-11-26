@@ -222,6 +222,20 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         let ask_views = node
             .as_ref()
             .map_or_default(|n| crate::run::ask::views(manifest.run_id.as_str(), n, now));
+        // Startup-blocked (`crate::run::startup`): lowest precedence, so it is
+        // computed only when no attention or stall verdict already explains
+        // the run and the supervisor is not confirmed dead (that is a stall
+        // whose remedy is `run reattach`). The transcript read sits in the
+        // same snapshot as the node.
+        let startup_blocked = node.as_ref().and_then(|n| {
+            crate::run::startup::view(
+                &paths,
+                &manifest,
+                n,
+                attention.is_some() || stall.is_some() || !supervisor.presumed_working(),
+                now,
+            )
+        });
         let landing = LandingFields {
             source_repo: manifest.source_repo.clone(),
             source_branch: manifest.source_branch.clone(),
@@ -244,6 +258,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
             attention,
             awaiting_input,
             ask_views,
+            startup_blocked,
             landing,
             nodes,
             transcripts,
@@ -261,6 +276,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         attention,
         awaiting_input,
         ask_views,
+        startup_blocked,
         landing,
         nodes,
         transcripts,
@@ -338,6 +354,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         .with_attention(attention)
         .with_awaiting_input(awaiting_input)
         .with_ask(ask_views)
+        .with_startup_blocked(startup_blocked)
         .with_resident(crate::run::resident::view(
             &manifest,
             nodes.iter().find(|n| n.node_id.as_str() == "n-0001"),
@@ -502,6 +519,19 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                      idle {idle} min). worktree {wt}. {hint}",
                     reason = att.reason,
                     hint = att.resume_hint,
+                );
+            }
+            if let Some(blocked) = &payload.summary.startup_blocked_detail {
+                let pid = blocked
+                    .worker_pid
+                    .map_or_else(|| "?".to_string(), |p| p.to_string());
+                println!(
+                    "startup-blocked: true — {reason} (worker pid {pid}, started {age} s ago, \
+                     grace {grace} s). {hint}",
+                    reason = blocked.reason,
+                    age = blocked.pending_age_secs,
+                    grace = blocked.grace_secs,
+                    hint = blocked.resume_hint,
                 );
             }
             if let Some(resident) = &payload.summary.resident {

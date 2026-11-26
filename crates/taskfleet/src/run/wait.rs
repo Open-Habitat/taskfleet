@@ -54,6 +54,15 @@
 //! expired question does not return the wait, and `--terminal` ignores
 //! questions as it ignores other attention.
 //!
+//! ## Startup-blocked workers
+//!
+//! A live autonomous Pi worker that has not reached its first turn within the
+//! startup grace ([`crate::run::startup`]) settles a default wait with
+//! `startup_blocked: true` and a `run attach` hint. The grace is measured from
+//! the later of the attempt start and this wait's start, so a wait wakes on it
+//! at most once and a re-wait does not return at once. It grades as an error
+//! under `--fail-on-error`; `--terminal` ignores it.
+//!
 //! ## Exit codes
 //!
 //! By default, a run counts as *settled* when it reaches a terminal status OR when it is
@@ -232,6 +241,17 @@ struct RunOutcome {
     /// merely when an un-escalated sibling is visible in an `--any` outcome.
     #[serde(skip)]
     settled_awaiting_input: bool,
+    /// Computed hint (never persisted): the live worker has not reached its
+    /// first turn within the startup grace and may be stopped at an
+    /// interactive startup prompt (see [`crate::run::startup`]). Visible
+    /// whenever it holds; it wakes a default wait at most once per wait.
+    startup_blocked: bool,
+    /// Context for [`Self::startup_blocked`], including the `run attach` hint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_blocked_detail: Option<crate::run::startup::StartupBlockedView>,
+    /// True only when the startup-blocked hint itself satisfied the wait.
+    #[serde(skip)]
+    settled_startup_blocked: bool,
     /// Resume context for an attention-required run — worktree path, source
     /// branch, worker pid, pending age, and a one-line resume hint — so an AI
     /// caller that unblocks on `attention_required` can drive `run merge` from the
@@ -472,6 +492,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             latched.awaiting_input = None;
             latched.caller = None;
             latched.ask = None;
+            latched.startup_woke = false;
         }
         let mut outcome = read_outcome(run_id, paths, latched)?;
         if args.check_in.is_some() {
@@ -537,6 +558,7 @@ type ProgressKey = (
     Option<u64>,
     Option<(u64, bool)>,
     Option<u64>,
+    bool,
 );
 
 fn wait_loop(
@@ -549,6 +571,10 @@ fn wait_loop(
     terminal_only: bool,
 ) -> Result<(Stop, Vec<LatchedSettle>), CliError> {
     let start = Instant::now();
+    // Wall-clock anchor for the startup-blocked wake: a wait wakes on that hint
+    // only once a full grace has passed since the later of the attempt start
+    // and this instant, so a re-wait never returns immediately on it.
+    let wait_started_at = jiff::Timestamp::now();
     let mut backoff = poll_interval.unwrap_or(BACKOFF_START);
     // Progress transitions key on `(status, stall, attention)` so a healthy
     // `pending` run going stillborn/orphaned OR attention-required (status
@@ -565,7 +591,7 @@ fn wait_loop(
         // deterministic and test-injectable through `stall_kind`.
         let now = jiff::Timestamp::now();
         for (i, (run_id, paths)) in runs.iter().enumerate() {
-            let settle = current_settle(paths, now)?.ok_or_else(|| {
+            let settle = current_settle(paths, now, wait_started_at)?.ok_or_else(|| {
                 // A run dir validated at entry but its manifest vanished
                 // mid-poll: report it rather than spin forever.
                 CliError::system(
@@ -582,6 +608,8 @@ fn wait_loop(
                 round: settle.round,
                 round_interrupted: settle.round_interrupted,
                 ask: settle.ask,
+                startup: settle.startup.clone(),
+                startup_woke: settle.startup_woke,
             };
             // A run is settled when it reaches a terminal status, OR when it is
             // stalled (a supervisor that died — before creating any node, or
@@ -597,6 +625,7 @@ fn wait_loop(
                         || settle.attention
                         || settle.round.is_some()
                         || settle.ask.is_some()
+                        || settle.startup_woke
                         || settle.awaiting_input.is_some()
                         || settle
                             .caller
@@ -616,20 +645,10 @@ fn wait_loop(
                     .as_ref()
                     .map(|c| (c.generation, c.state.needs_attention())),
                 settle.ask,
+                settle.startup.is_some(),
             );
             if progress && prev[i] != Some(key) {
-                emit_progress(
-                    run_id,
-                    settle.status,
-                    settle.stall.is_some(),
-                    settle.attention,
-                    settle.awaiting_input.is_some(),
-                    settle
-                        .caller
-                        .as_ref()
-                        .map(|c| (c.generation, c.state.needs_attention())),
-                    settle.ask,
-                );
+                emit_progress(run_id, &settle);
             }
             prev[i] = Some(key);
         }
@@ -726,6 +745,11 @@ struct Settle {
     /// deadline (ADR 0004). Settles the wait immediately, with no grace: the
     /// worker is blocked and the reader is its parent.
     ask: Option<u64>,
+    /// The live worker has not reached its first turn (see
+    /// [`crate::run::startup`]); lowest precedence.
+    startup: Option<crate::run::startup::StartupBlockedView>,
+    /// Whether that hint wakes this wait now ([`crate::run::startup::wakes_wait`]).
+    startup_woke: bool,
 }
 
 /// The two non-terminal settle verdicts a poll can latch for a run — the stall
@@ -743,6 +767,8 @@ struct LatchedSettle {
     round: Option<u64>,
     round_interrupted: bool,
     ask: Option<u64>,
+    startup: Option<crate::run::startup::StartupBlockedView>,
+    startup_woke: bool,
 }
 
 /// Read a run's [`Settle`] snapshot under the shared lock. `None` when the run
@@ -755,7 +781,11 @@ struct LatchedSettle {
 /// manifest (the pid file is removed without the lock, and process death is
 /// unsynchronized). The probe is read here so it is as fresh as the manifest it
 /// sits beside — a best-effort point-in-time hint, not a welded pairing.
-fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settle>, CliError> {
+fn current_settle(
+    paths: &RunPaths,
+    now: jiff::Timestamp,
+    wait_started_at: jiff::Timestamp,
+) -> Result<Option<Settle>, CliError> {
     RunLock::with_shared_lock(&paths.lock(), || {
         let Some(m) = read_manifest_opt(paths)? else {
             return Ok(None);
@@ -816,6 +846,26 @@ fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settl
                 now,
             )
         };
+        // Startup-blocked, lowest precedence: never alongside attention, a
+        // stall, a confirmed-dead supervisor, an open round, or a caller stop.
+        let startup_since = node.as_ref().and_then(|n| {
+            crate::run::startup::detect(
+                paths,
+                &m,
+                n,
+                attention
+                    || stall.is_some()
+                    || !supervisor.presumed_working()
+                    || round.is_some()
+                    || caller.is_some(),
+                now,
+            )
+        });
+        let startup_woke = startup_since
+            .is_some_and(|since| crate::run::startup::wakes_wait(since, wait_started_at, now));
+        let startup = startup_since.zip(node.as_ref()).map(|(since, n)| {
+            crate::run::startup::StartupBlockedView::build(m.run_id.as_str(), n, since, now)
+        });
         Ok(Some(Settle {
             status: m.status,
             stall,
@@ -826,6 +876,8 @@ fn current_settle(paths: &RunPaths, now: jiff::Timestamp) -> Result<Option<Settl
             round,
             round_interrupted,
             ask,
+            startup,
+            startup_woke,
         }))
     })
     .map_err(from_core)
@@ -992,6 +1044,14 @@ fn read_outcome(
             .or(git_inputs.awaiting_input.as_ref())
     };
     let awaiting_input = open.is_some();
+    // Startup-blocked: visible whenever the settling poll saw it on a
+    // non-terminal run, and the reason for the settle only when it woke it.
+    let startup_blocked_detail = if status.is_terminal() {
+        None
+    } else {
+        latched.startup.clone()
+    };
+    let settled_startup_blocked = startup_blocked_detail.is_some() && latched.startup_woke;
     // `error` explains a non-`done` settle. For failed/cancelled the §7.3 report
     // has no dedicated error field, so surface the cancel `reason` when present;
     // for a stalled settle (a `pending`/`running` run graded as a failure under
@@ -1018,6 +1078,8 @@ fn read_outcome(
         Some(stall_reason(kind).to_string())
     } else if settled_awaiting_input {
         Some(crate::run::awaiting_input::AWAITING_INPUT_REASON.to_string())
+    } else if settled_startup_blocked {
+        Some(crate::run::startup::REASON.to_string())
     } else if matches!(status, Status::Failed | Status::Cancelled) {
         report
             .as_ref()
@@ -1084,6 +1146,9 @@ fn read_outcome(
         awaiting_input,
         awaiting_input_detail,
         settled_awaiting_input,
+        startup_blocked: startup_blocked_detail.is_some(),
+        startup_blocked_detail,
+        settled_startup_blocked,
         attention,
         summary,
         error,
@@ -1163,6 +1228,7 @@ fn any_settled_error(outcomes: &[RunOutcome], terminal_only: bool) -> bool {
             || o.stalled
             || o.attention_required
             || o.settled_awaiting_input
+            || o.settled_startup_blocked
             || o.caller_agent.as_ref().is_some_and(|v| v.settled_generation.is_some() && !matches!(o.status, "done" | "failed" | "cancelled"))
             // A confirmed merge may still be in the supervisor's teardown window.
             // A report-only success has no merge authority and must be reviewed.
@@ -1176,21 +1242,24 @@ fn any_settled_error(outcomes: &[RunOutcome], terminal_only: bool) -> bool {
 /// verdicts so a run that goes stillborn/orphaned OR attention-required without a
 /// status change (it stays `pending`) still surfaces one line. Best-effort: a
 /// serialization failure is swallowed rather than aborting the wait.
-fn emit_progress(
-    run_id: &str,
-    status: Status,
-    stalled: bool,
-    attention_required: bool,
-    awaiting_input: bool,
-    caller: Option<(u64, bool)>,
-    ask: Option<u64>,
-) {
+fn emit_progress(run_id: &str, settle: &Settle) {
+    let status = settle.status;
+    let stalled = settle.stall.is_some();
+    let attention_required = settle.attention;
+    let awaiting_input = settle.awaiting_input.is_some();
+    let startup_blocked = settle.startup.is_some();
+    let ask = settle.ask;
+    let caller = settle
+        .caller
+        .as_ref()
+        .map(|c| (c.generation, c.state.needs_attention()));
     let mut event = serde_json::json!({
         "run_id": run_id,
         "status": status_kebab(status),
         "stalled": stalled,
         "attention_required": attention_required,
         "awaiting_input": awaiting_input,
+        "startup_blocked": startup_blocked,
     });
     if let Some(ask_id) = ask {
         event["ask_id"] = serde_json::json!(ask_id);
@@ -1316,6 +1385,13 @@ fn emit(data: &WaitData, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                             id = r.run_id
                         ),
                     }
+                }
+                if r.startup_blocked {
+                    print!(
+                        "  startup_blocked=true (`run attach {id}` to see the prompt, \
+                         or `run cancel {id}`)",
+                        id = r.run_id
+                    );
                 }
                 if !r.preserved_work.is_empty() {
                     print!(
@@ -1475,6 +1551,9 @@ mod tests {
             awaiting_input: false,
             awaiting_input_detail: None,
             settled_awaiting_input: false,
+            startup_blocked: false,
+            startup_blocked_detail: None,
+            settled_startup_blocked: false,
             attention: None,
             summary: None,
             error: None,
@@ -1522,6 +1601,26 @@ mod tests {
         assert!(any_settled_error(&[mk_awaiting()], false));
         assert!(!any_settled_error(&[mk("done"), mk_awaiting()], true));
         assert!(any_settled_error(&[mk("failed"), mk_awaiting()], true));
+        // A startup-blocked wake grades as a settled error; the hint merely
+        // being visible on an outcome that settled otherwise does not.
+        assert!(any_settled_error(
+            &[RunOutcome {
+                startup_blocked: true,
+                settled_startup_blocked: true,
+                ..mk("pending")
+            }],
+            false
+        ));
+        assert!(!any_settled_error(
+            &[
+                mk("done"),
+                RunOutcome {
+                    startup_blocked: true,
+                    ..mk("running")
+                }
+            ],
+            false
+        ));
         // Visible but pre-grace awaiting input on an unsettled `--any` sibling
         // does not grade the completed sibling as an error.
         assert!(!any_settled_error(

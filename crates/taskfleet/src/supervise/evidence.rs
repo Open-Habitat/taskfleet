@@ -463,7 +463,7 @@ pub(crate) fn save_dormant_pane(paths: &RunPaths, node: &Node, tmux: &str) -> Re
     write_atomic(&dir.join(DORMANT_PANE), &pane)
 }
 
-fn checked_live_path(paths: &RunPaths, recorded: &str) -> Result<PathBuf, String> {
+pub(crate) fn checked_live_path(paths: &RunPaths, recorded: &str) -> Result<PathBuf, String> {
     let relative = PathBuf::from(recorded);
     let state_root = paths
         .root

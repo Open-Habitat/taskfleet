@@ -1199,3 +1199,170 @@ fn check_in_deadline_precedence_and_multi_run_terminal_mode() {
         assert_eq!(output.stdout, [] as [u8; 0]);
     }
 }
+
+/// Kills and reaps a parked stand-in supervisor process on drop.
+struct StandIn(std::process::Child);
+
+impl Drop for StandIn {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Forge a live, handshaken Pi worker on `n-0001` whose attempt started ten
+/// minutes ago and whose native transcript holds only Taskfleet's header: a
+/// live stand-in process is parked as the supervisor and worker pid, and the
+/// node projection is patched like [`stamp_clean_worker_exit`]. Returns the
+/// stand-in and the transcript path.
+fn forge_startup_blocked(home: &TempDir, run_id: &str) -> (StandIn, std::path::PathBuf) {
+    add_node(home, run_id, "n-0001");
+    let child = Command::new("sleep")
+        .arg("300")
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("spawn stand-in");
+    let pid = child.id();
+    let stand_in = StandIn(child);
+    let run_dir = home.path().join("runs").join(run_id);
+    std::fs::write(run_dir.join("supervisor.pid"), pid.to_string()).unwrap();
+
+    let session_id = "0b6f5a3e-2c1d-4e8f-9a7b-1c2d3e4f5a6b";
+    let relative = format!(".creating/pi-sessions/{run_id}/pi-session-{session_id}.jsonl");
+    let transcript = home.path().join(&relative);
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    std::fs::write(
+        &transcript,
+        format!(
+            "{}\n",
+            json!({"type": "session", "version": 3, "id": session_id, "cwd": "/work/wt"})
+        ),
+    )
+    .unwrap();
+
+    let node_path = run_dir.join("nodes").join("n-0001.json");
+    let mut n: Value = serde_json::from_slice(&std::fs::read(&node_path).unwrap()).unwrap();
+    let started = jiff::Timestamp::now() - jiff::SignedDuration::from_mins(10);
+    let obj = n.as_object_mut().unwrap();
+    obj.insert("agent_pid".into(), json!(pid));
+    obj.insert("started_at".into(), json!(started.to_string()));
+    obj.insert(
+        "evidence".into(),
+        json!({
+            "attempt": 0,
+            "session_id": session_id,
+            "original_cwd": "/work/wt",
+            "live_session_path": relative,
+            "status": "pending"
+        }),
+    );
+    std::fs::write(&node_path, serde_json::to_vec(&n).unwrap()).unwrap();
+    (stand_in, transcript)
+}
+
+/// A live worker that never reached its first turn is a read-time
+/// `startup_blocked` hint on show/list, wakes a default wait (naming
+/// `run attach`) without terminalizing anything, is ignored by `--terminal`,
+/// and clears as soon as Pi appends its first transcript entry.
+#[test]
+fn startup_blocked_worker_wakes_default_wait_and_clears_on_first_turn() {
+    let home = TestHome::new();
+    let run = pending_run(&home, "startup-blocked");
+    let (_stand_in, transcript) = forge_startup_blocked(&home, &run);
+
+    let show = run_ok(bin(&home).args(["--output", "json", "run", "show", &run]));
+    let data = &show["data"];
+    assert_eq!(data["startup_blocked"], true, "{data}");
+    assert_eq!(data["stalled"], false);
+    assert_eq!(data["attention_required"], false);
+    let hint = data["startup_blocked_detail"]["resume_hint"]
+        .as_str()
+        .unwrap();
+    assert!(
+        hint.contains(&format!("taskfleet run attach '{run}'")),
+        "{hint}"
+    );
+    let list = run_ok(bin(&home).args(["--output", "json", "run", "list"]));
+    let row = list["data"]["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["run_id"] == run)
+        .unwrap();
+    assert_eq!(row["startup_blocked"], true);
+
+    // --terminal ignores the hint (it times out) but still shows it.
+    let terminal = run_exit(
+        bin(&home)
+            .env("TASKFLEET_STARTUP_BLOCKED_GRACE_SECS", "0")
+            .args([
+                "--output",
+                "json",
+                "run",
+                "wait",
+                &run,
+                "--terminal",
+                "--timeout",
+                "600ms",
+            ]),
+        2,
+    );
+    assert_eq!(terminal["data"]["runs"][0]["startup_blocked"], true);
+    assert!(terminal["data"]["runs"][0]["error"].is_null());
+
+    // A default wait wakes once a grace of its own has passed, without
+    // terminalizing the run; under --fail-on-error the wake grades as exit 3.
+    let start = std::time::Instant::now();
+    let woke = run_exit(
+        bin(&home)
+            .env("TASKFLEET_STARTUP_BLOCKED_GRACE_SECS", "1")
+            .args([
+                "--output",
+                "json",
+                "run",
+                "wait",
+                &run,
+                "--timeout",
+                "30s",
+                "--fail-on-error",
+            ]),
+        3,
+    );
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= std::time::Duration::from_secs(1)
+            && elapsed < std::time::Duration::from_secs(10),
+        "wait must wake one grace after it began, took {elapsed:?}"
+    );
+    let r = &woke["data"]["runs"][0];
+    assert_eq!(woke["data"]["outcome"], "condition-met");
+    assert_eq!(r["status"], "pending", "{r}");
+    assert_eq!(r["startup_blocked"], true, "{r}");
+    assert_eq!(
+        r["error"],
+        "worker has not reached its first turn; it may be stopped at an interactive startup prompt"
+    );
+
+    // Pi's first entry after the header clears the hint everywhere.
+    let mut bytes = std::fs::read(&transcript).unwrap();
+    bytes.extend_from_slice(b"{\"type\":\"model_change\"}\n");
+    std::fs::write(&transcript, bytes).unwrap();
+    let show = run_ok(bin(&home).args(["--output", "json", "run", "show", &run]));
+    assert_eq!(show["data"]["startup_blocked"], false);
+    assert!(show["data"].get("startup_blocked_detail").is_none());
+    let quiet = run_exit(
+        bin(&home)
+            .env("TASKFLEET_STARTUP_BLOCKED_GRACE_SECS", "0")
+            .args([
+                "--output",
+                "json",
+                "run",
+                "wait",
+                &run,
+                "--timeout",
+                "600ms",
+            ]),
+        2,
+    );
+    assert_eq!(quiet["data"]["runs"][0]["startup_blocked"], false);
+}
