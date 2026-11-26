@@ -2,7 +2,7 @@
 created: 2026-11-10
 updated: 2026-11-26
 type: feature
-status: in-progress
+status: done
 priority: normal
 provenance: other
 provenance_detail: Open Habitat ADR 0036 change list (Taskfleet / conductor skills row)
@@ -10,6 +10,8 @@ source_ref: taskfleet:01m71zxvdgwg2vsmd0cdrffz5p/adr-0036:conductor-separate-pro
 originating_run: 01m71zxvdgwg2vsmd0cdrffz5p
 originating_run_kind: spinoff
 lane: conductor-skills
+closed: 2026-11-26
+closed_by: agent:taskfleet-worker
 ---
 
 # Conductor skills: separate private narrative root from the product tracker and worker source
