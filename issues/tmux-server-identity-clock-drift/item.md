@@ -2,7 +2,7 @@
 created: 2026-10-25
 updated: 2026-11-26
 type: bug
-status: open
+status: in-progress
 priority: normal
 provenance: ai-review
 source_ref: taskfleet:01m5t7sh2k42k77drb89tcsgx0/review-finding:tmux-server-identity-seconds
