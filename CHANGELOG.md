@@ -17,8 +17,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Timestamps are handled with `jiff` instead of the now-unmaintained `chrono` (RUSTSEC-2026-0543), and human durations (`run wait --timeout`, `--poll-interval`, `--check-in`, `tmux.completed_window_ttl`) are parsed by a small local parser instead of the unmaintained `humantime` (RUSTSEC-2026-0542), accepting the same units including days and weeks (`cargo-deny-advisories-2026-11`). Stored and JSON timestamps stay RFC 3339 UTC and existing run state reads unchanged; fractional seconds are now printed with the fewest digits needed, and text-mode output and `event tail` print the RFC 3339 `…Z` form instead of `YYYY-MM-DD HH:MM:SS UTC` / `+00:00`. `taskfleet-core`'s public timestamp fields are now `jiff::Timestamp`.
 
-- Replace unmaintained `chrono` and `humantime` dependencies (`cargo-deny-advisories-2026-11`).
-
 - The generated worker preamble and the bundled skills (`worktree-spinoff`, `taskfleet-spawn-spinoff`, `worktree-technical-decision`, `stint-start`, `fan-out`, `taskfleet-run-overview` and the shared wait guidance) tell workers to ask with `node ask` and parents to answer with `run answer`; a terminal `success: false` report remains for a decision with no acceptable default.
 
 ### Fixed
