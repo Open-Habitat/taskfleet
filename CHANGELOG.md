@@ -12,9 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 ### Fixed
+<!-- oss-changelog:unreleased-end -->
+
+## [0.21.1] - 2026-11-26
+
+### Fixed
 
 - Terminal workers no longer retain their worktree indefinitely when final pane capture fails. The supervisor archives the available transcript and report with a durable pane-unavailable diagnostic, then applies the existing Git preservation checks.
-<!-- oss-changelog:unreleased-end -->
+
+- Failed pane capture blocks terminal worktree teardown (`pane-capture-blocks-teardown`).
+- Spinoff teardown removed a foreign worktree's registration (.git/worktrees deleted) (`teardown-removes-foreign-worktree`).
 
 ## [0.21.0] - 2026-11-26
 
