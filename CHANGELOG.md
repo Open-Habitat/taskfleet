@@ -9,6 +9,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Fixed
+<!-- oss-changelog:unreleased-end -->
+
+## [0.22.0] - 2026-11-26
+
+### Added
+
 - A live autonomous Pi worker that passed its PID handshake but never reached its first turn is now visible to the parent (`startup-blocked-attention`). When the attempt's native transcript still holds only the header Taskfleet wrote two minutes after the worker started (`TASKFLEET_STARTUP_BLOCKED_GRACE_SECS` overrides the grace), `run show`, `run list` and `run wait` report `startup_blocked: true` with a `startup_blocked_detail` naming `run attach` to see the prompt (trust, session selector, authentication) or `run cancel`. A default `run wait` wakes on it once a grace has passed since the later of the worker's start and the wait's own start, so waiting again after the wake does not return at once; it grades as an error under `--fail-on-error` and `--terminal` ignores it. It is a read-time hint like the stall verdicts: no event is recorded and the run's status never changes. Claude workers, caller-owned runs, interactive runs and resumed resident rounds have no such signal and never show it.
 
 ### Changed
@@ -27,7 +36,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A Taskfleet-launched Pi worker no longer stops at Pi's project trust prompt in its fresh worktree (`pi-worker-trust-prompt`). The launcher passes Pi's one-run `--approve` or `--no-approve` carrying the decision Pi's trust store (`$PI_CODING_AGENT_DIR` or `~/.pi/agent/trust.json`, nearest entry) already holds for the run's source checkout, so a worker is never trusted beyond what was given to the same repository and nothing is written to the store. When the source has no decision, or the store cannot be read, an autonomous worker gets `--no-approve` and loads no project-local Pi resources; an interactive worker keeps Pi's own prompt. A trust flag in the profile's Pi argv stands unchanged. Initial launches, retries and resident rounds all apply it.
 - A completed worker's retained tmux display is no longer given up, and `session maintain` no longer expires a retained display that still exists, after the host clock is stepped (`tmux-server-identity-clock-drift`). The tmux server's identity is now recorded and compared as the kernel start identity, like agent and supervisor PIDs; the drifting start-time seconds decide only for runs recorded before this change, and a server whose start cannot be read while it is alive is treated as unverifiable rather than gone.
-<!-- oss-changelog:unreleased-end -->
 
 ## [0.21.1] - 2026-11-26
 
