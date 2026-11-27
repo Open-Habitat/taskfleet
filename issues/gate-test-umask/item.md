@@ -3,11 +3,13 @@ created: 2026-11-26
 updated: 2026-11-27
 type: bug
 reporter: agent
-status: in-progress
+status: fixed
 priority: normal
 provenance: agent
 source_ref: stint:2026-11-26:release-0.21.1-umask
 lane: release
+closed: 2026-11-27
+closed_by: agent:taskfleet-worker
 ---
 
 # Release gate test depends on caller umask (linux_lifetime runtime validation)
