@@ -345,7 +345,7 @@ fn killed_creator_reuses_the_exact_reservation_and_preserves_dirty_work() {
 
 #[test]
 fn native_pi_binding_is_immutable_and_readable_after_checkout_removal() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::symlink;
     let (home, workspace, tools) = fixture();
     let created = create(&home, &workspace, &tools, "bind", None);
     assert!(
@@ -470,7 +470,6 @@ fn native_pi_binding_is_immutable_and_readable_after_checkout_removal() {
 
 #[test]
 fn caller_pi_told_wait_and_generation_contract() {
-    use std::os::unix::fs::PermissionsExt;
     let (home, workspace, tools) = fixture();
     let created = create(&home, &workspace, &tools, "wait", None);
     assert!(created.status.success(), "{created:?}");
