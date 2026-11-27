@@ -410,6 +410,13 @@ For the completed path, once the work is committed:
    stays live: resolve the conflict (or `/complex-rebase` for a deeply diverged
    branch) and re-run the same `run merge` command.
 
+   `run merge` is the worker's last command, and the run ends with its report.
+   Teardown kills anything scheduled after it in the same shell, so a brief
+   never asks the worker to push, verify the remote, or do any other step after
+   the merge. `run merge` integrates into the local source branch only; the
+   caller pushes after confirming the landing, where repository policy calls
+   for it.
+
 A worker that hits a decision its brief does not settle asks its parent and
 blocks on the answer (ADR 0004). It is a plain shell command, so it works the
 same for Pi, Claude, and Codex workers:
@@ -600,7 +607,9 @@ landed". The CLI's check is patch-id based against the current target tip and
 survives that; when git cannot run because the branch is gone it falls back to
 the durable `run merge` marker. `landed: false` with method `unverified` means
 "could not confirm", so verify by content on the actual target before concluding
-the work is missing. `run show` also lists `preserved_work` (retained worktrees or
+the work is missing. A landing is local: the source branch moved in this
+checkout, and pushing it is the caller's step once `landed` is confirmed, under
+the repository's remote policy. `run show` also lists `preserved_work` (retained worktrees or
 branches, including on a `done` run) and, on a failed run, `recoverable_work`
 from the report.
 

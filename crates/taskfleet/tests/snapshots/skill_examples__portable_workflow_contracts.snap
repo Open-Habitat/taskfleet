@@ -173,8 +173,10 @@ reviewer is unavailable, report that blocker rather than weaken the brief.
 Await each full run id as described in Parent wait and delivery. Read the full
 report, verify landing and content on the actual source, and preserve failed
 work for an explicit recovery decision. Never hand-merge around native run
-ownership. Run the project's gate again on integrated work. Deploy or push only
-with repository/user authorization; a missing policy grants neither. Report
+ownership. Run the project's gate again on integrated work. Workers do not
+push: `run merge` lands on the local source branch and the run ends there, so
+you push after the landings. Deploy or push only with repository/user
+authorization; a missing policy grants neither. Report
 what is ready to try, validation and review gaps, retained work, and one next
 action. Stop after the accepted scope; finishing a round is not a request for
 another one. On an explicit finish request, save a repository-local handoff

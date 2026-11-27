@@ -441,6 +441,11 @@ batch if the user decides that is what they want. Where children merged
 directly into the source there is nothing to merge either way, and the driver
 closes with a direct report whose `success` says whether the batch is whole.
 
+The closing call is the last thing the driver does: teardown follows its
+report, so neither a child nor the driver pushes or checks the remote after it.
+The merge lands locally, and the caller pushes once it has confirmed the
+landing.
+
 ## What the caller hears
 
 `run create --kind fan-out` returns the usual envelope: `data.run_id`,

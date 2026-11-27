@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 ### Fixed
+
+- Workers are no longer told to push or check the remote after `run merge`, a step that teardown killed silently because the supervisor tears the worker down as soon as the merge report lands (`post-merge-push-killed`). The generated worker preamble and the `worktree-spinoff`, `worktree-merge` and `fan-out` skills now say the merge is the worker's last command and lands on the local source branch only, and `stint-start` tells the conductor to push after confirming the round's landings, under the repository's remote policy. `run merge` itself is unchanged and still does not push.
 <!-- oss-changelog:unreleased-end -->
 
 ## [0.22.0] - 2026-11-26

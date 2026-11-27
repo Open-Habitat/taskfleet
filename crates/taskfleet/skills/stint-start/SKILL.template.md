@@ -212,8 +212,10 @@ reviewer is unavailable, report that blocker rather than weaken the brief.
 Await each full run id as described in Parent wait and delivery. Read the full
 report, verify landing and content on the actual source, and preserve failed
 work for an explicit recovery decision. Never hand-merge around native run
-ownership. Run the project's gate again on integrated work. Deploy or push only
-with repository/user authorization; a missing policy grants neither. Report
+ownership. Run the project's gate again on integrated work. Workers do not
+push: `run merge` lands on the local source branch and the run ends there, so
+you push after the landings. Deploy or push only with repository/user
+authorization; a missing policy grants neither. Report
 what is ready to try, validation and review gaps, retained work, and one next
 action. Stop after the accepted scope; finishing a round is not a request for
 another one. On an explicit finish request, save a repository-local handoff
@@ -253,7 +255,11 @@ file buys either a serialization or a broken integrated `main`. A brief that
 carries the goal, concrete done criteria, the project's exact gate command,
 the files the worker should expect to touch, and the review level the risk
 warrants produces a worker that lands; a brief that paraphrases the gate
-produces a worktree that passes alone and turns `main` red. Do not rely on live
+produces a worktree that passes alone and turns `main` red. A brief ends with
+`run merge` and asks for nothing after it: the supervisor tears the worker down
+as soon as the merge report lands, so a push or remote check scheduled after
+the merge is killed silently, and `run merge` integrates into the local source
+branch only. Pushing is yours, after you confirm the landings. Do not rely on live
 follow-up replies: pre-authorize safe defaults and say which new decisions
 require preserving work and escalating. The useful test when writing a brief
 is what the worker would want to ask.
@@ -568,6 +574,17 @@ taskfleet run discard <run-id> --reason <text> --dry-run --output json
 
 A clean exit with no merge is attention-required, not failed: the worker
 skipped `run merge`, and the work is still there.
+
+## Push
+
+`run merge` integrates a worker into the local source branch and nothing
+more; the worker's run ends with its merge report, so no worker pushes. Once
+the round's landings are confirmed, push `main` yourself where the
+repository's remote policy calls for it: pull with rebase first, since
+parallel sessions push under you, and push before the deploy and before the
+handoff. A worker report that promises a push after its merge describes a
+step that was torn down with it; check `git status` against the upstream
+rather than trusting it.
 
 ## Deploy
 

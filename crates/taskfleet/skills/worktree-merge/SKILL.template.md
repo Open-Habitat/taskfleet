@@ -72,7 +72,10 @@ conflict whose two resolutions differ in a way the human would care about is
 worth a question.
 
 `run merge` is local delivery, not authorization to push, publish, deploy, or
-change installed tools. Resolve conflicts with ordinary Git and revalidate changed
+change installed tools. It is also the worker's last command: the supervisor
+tears the worker down as soon as the merge report lands, so a push, remote
+check, or any other step scheduled after it is killed silently. The worker's
+run ends with the merge; the caller pushes after confirming the landing. Resolve conflicts with ordinary Git and revalidate changed
 content; optional rebase helpers may assist. If intent cannot be reconciled safely,
 report blocked and preserve work rather than bypass native merge.
 
