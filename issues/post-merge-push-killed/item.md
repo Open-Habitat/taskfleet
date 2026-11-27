@@ -1,12 +1,13 @@
 ---
 created: 2026-11-26
-updated: 2026-11-26
+updated: 2026-11-27
 type: bug
 reporter: agent
-status: untriaged
+status: open
 priority: normal
 provenance: agent
 source_ref: stint:2026-11-26:post-merge-push
+lane: merge
 ---
 
 # Post-merge push in worker never runs: teardown follows the merge report

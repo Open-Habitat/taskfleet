@@ -1,12 +1,13 @@
 ---
 created: 2026-11-26
-updated: 2026-11-26
+updated: 2026-11-27
 type: bug
 reporter: agent
-status: untriaged
+status: open
 priority: normal
 provenance: agent
 source_ref: stint:2026-11-26:release-0.21.1-umask
+lane: release
 ---
 
 # Release gate test depends on caller umask (linux_lifetime runtime validation)
