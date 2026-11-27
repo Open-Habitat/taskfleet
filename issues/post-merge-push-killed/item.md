@@ -3,11 +3,13 @@ created: 2026-11-26
 updated: 2026-11-27
 type: bug
 reporter: agent
-status: in-progress
+status: fixed
 priority: normal
 provenance: agent
 source_ref: stint:2026-11-26:post-merge-push
 lane: merge
+closed: 2026-11-27
+closed_by: agent:taskfleet-worker
 ---
 
 # Post-merge push in worker never runs: teardown follows the merge report
