@@ -2012,6 +2012,7 @@ fn emit(
 #[cfg(test)]
 mod caller_merge_tests {
     use super::*;
+    use crate::run::private_fixture::{create_private_store, private_home};
     use std::fs;
     use std::os::fd::AsRawFd;
     use taskfleet_core::RunPaths;
@@ -2104,8 +2105,7 @@ mod caller_merge_tests {
                 use std::os::unix::fs::{MetadataExt, PermissionsExt};
                 let store =
                     Path::new(&std::env::var_os("HOME").unwrap()).join(".pi/agent/sessions");
-                fs::create_dir_all(&store).unwrap();
-                fs::set_permissions(&store, fs::Permissions::from_mode(0o700)).unwrap();
+                create_private_store(&store);
                 let id = "b30d3508-a8d4-4aa7-bafa-7f5dfef72014";
                 let timestamp = "2026-08-01T10:20:30.000Z";
                 let path = store.join(format!(
@@ -2114,6 +2114,7 @@ mod caller_merge_tests {
                     id
                 ));
                 fs::write(&path, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"timestamp\":\"{timestamp}\",\"cwd\":\"{}\"}}\n", checkout.display())).unwrap();
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
                 append_and_apply_event(
                     &paths,
                     "caller.pi.lifecycle",
@@ -2366,7 +2367,7 @@ mod caller_merge_tests {
     fn native_history_survives_git_only_cleanup_and_missing_history_preserves() {
         // HOME is process-global. Run the real producer/consumer in an isolated
         // test process rather than changing the parallel nextest worker's HOME.
-        let home = tempfile::tempdir_in("/var/tmp").unwrap();
+        let home = private_home();
         let child = Command::new(std::env::current_exe().unwrap())
             .arg("--exact")
             .arg("run::merge::caller_merge_tests::native_history_child")

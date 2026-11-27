@@ -299,6 +299,9 @@ mod tests {
     #[test]
     fn runtime_validation_rejects_wrong_owner_symlink_missing_and_open_permissions() {
         let dir = tempfile::tempdir().unwrap();
+        // tempdir() honours the caller's umask; pin 0700 so the positive case
+        // does not depend on the environment running the tests.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
         let uid = unsafe { libc::geteuid() };
         assert!(validate_dir(dir.path(), uid).is_ok());
         assert!(validate_dir(dir.path(), uid.wrapping_add(1)).is_err());

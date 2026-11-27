@@ -50,7 +50,7 @@ fn invalid_runtime_directory_is_actionable_and_has_no_worktree_side_effects() {
 #[test]
 fn missing_manager_does_not_fall_back_to_native_detach() {
     let home = TestHome::new();
-    let runtime = TempDir::new().unwrap();
+    let runtime = common::private_tempdir();
     let mut create = Command::new(env!("CARGO_BIN_EXE_taskfleet"));
     let out = create
         .env("HOME", home.path())

@@ -674,6 +674,7 @@ fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run::private_fixture::{create_private_store, private_home};
     use std::fs;
     use std::os::fd::AsRawFd;
     use std::process::Command;
@@ -764,7 +765,7 @@ mod tests {
             if with_pi {
                 let store =
                     Path::new(&std::env::var_os("HOME").unwrap()).join(".pi/agent/sessions");
-                fs::create_dir_all(&store).unwrap();
+                create_private_store(&store);
                 let id = "b30d3508-a8d4-4aa7-bafa-7f5dfef72014";
                 let timestamp = "2026-08-01T10:20:30.000Z";
                 let history = store.join(format!(
@@ -773,6 +774,11 @@ mod tests {
                     id
                 ));
                 fs::write(&history, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"timestamp\":\"{timestamp}\",\"cwd\":\"{}\"}}\n",checkout.display())).unwrap();
+                fs::set_permissions(
+                    &history,
+                    <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+                )
+                .unwrap();
                 append_and_apply_event(
                     &paths,
                     "caller.pi.lifecycle",
@@ -1230,7 +1236,7 @@ mod tests {
     #[test]
     fn missing_or_replaced_native_history_preserves_checkout() {
         // HOME is process-global. Keep native history under an isolated child HOME.
-        let home = tempfile::tempdir_in("/var/tmp").unwrap();
+        let home = private_home();
         let child = Command::new(std::env::current_exe().unwrap())
             .arg("--exact")
             .arg("run::caller_discard::tests::history_child")
@@ -1295,7 +1301,7 @@ mod tests {
     }
     #[test]
     fn reserved_bound_history_survives_without_started() {
-        let home = tempfile::tempdir_in("/var/tmp").unwrap();
+        let home = private_home();
         let child = Command::new(std::env::current_exe().unwrap())
             .arg("--exact")
             .arg("run::caller_discard::tests::reserved_bound_history_child")

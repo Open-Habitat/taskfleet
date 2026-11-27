@@ -1519,6 +1519,33 @@ pub fn from_core(err: taskfleet_core::Error) -> CliError {
     }
 }
 
+/// Fixtures for unit tests whose production paths check directory privacy.
+/// `tempfile` and `create_dir_all` honour the caller's umask, so a fixture
+/// built with them passes under umask 077 and fails under the common 0002.
+#[cfg(test)]
+pub(crate) mod private_fixture {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::path::Path;
+
+    /// A disk-backed temporary HOME with mode 0700. Native Pi history is
+    /// validated for group/other write on every ancestor, so the HOME a child
+    /// test process uses must be private.
+    pub(crate) fn private_home() -> tempfile::TempDir {
+        let dir = tempfile::tempdir_in("/var/tmp").unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir
+    }
+
+    /// Create a Pi session store and its missing parents with mode 0700.
+    pub(crate) fn create_private_store(path: &Path) {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

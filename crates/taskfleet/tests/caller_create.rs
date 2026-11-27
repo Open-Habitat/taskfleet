@@ -14,8 +14,10 @@ fn git(repo: &Path, args: &[&str]) {
 }
 fn fixture() -> (TestHome, tempfile::TempDir, tempfile::TempDir) {
     let home = TestHome::new();
-    let workspace = tempfile::TempDir::new().unwrap();
-    let tools = tempfile::TempDir::new().unwrap();
+    // Private like a real home: native Pi history below the workspace must
+    // not be group-writable at any ancestor, whatever the caller's umask.
+    let workspace = common::private_tempdir();
+    let tools = common::private_tempdir();
     let repo = workspace.path().join("repo");
     std::fs::create_dir(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
@@ -356,19 +358,13 @@ fn native_pi_binding_is_immutable_and_readable_after_checkout_removal() {
     let checkout = value["data"]["worktree_path"].as_str().unwrap();
     let native_home = workspace.path().join("native-home");
     let store = native_home.join(".pi/agent/sessions/project");
-    std::fs::create_dir_all(&store).unwrap();
-    std::fs::set_permissions(
-        native_home.join(".pi/agent/sessions"),
-        std::fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
+    common::create_private_dir_all(&store);
     let id = "b30d3508-a8d4-4aa7-bafa-7f5dfef72014";
     let path = store.join("session.jsonl");
-    std::fs::write(
+    common::write_private_file(
         &path,
         format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"cwd\":\"{checkout}\"}}\n"),
-    )
-    .unwrap();
+    );
     let call = |run: &str, node: &str, path: &Path, checkout: &str| -> Output {
         Command::new(env!("CARGO_BIN_EXE_taskfleet"))
             .args([
@@ -436,11 +432,10 @@ fn native_pi_binding_is_immutable_and_readable_after_checkout_removal() {
         call(run, "n-0001", &linked.join("other.jsonl"), checkout),
         "invalid_pi_session",
     ); // symlinked parent is never followed
-    std::fs::write(
+    common::write_private_file(
         &path,
         format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"cwd\":\"{checkout}\"}}\n"),
-    )
-    .unwrap();
+    );
     git(
         &workspace.path().join("repo"),
         &["worktree", "remove", "--force", checkout],
@@ -484,19 +479,13 @@ fn caller_pi_told_wait_and_generation_contract() {
     let checkout = v["data"]["worktree_path"].as_str().unwrap();
     let native_home = workspace.path().join("native-home");
     let store = native_home.join(".pi/agent/sessions/project");
-    std::fs::create_dir_all(&store).unwrap();
-    std::fs::set_permissions(
-        native_home.join(".pi/agent/sessions"),
-        std::fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
+    common::create_private_dir_all(&store);
     let id = "b30d3508-a8d4-4aa7-bafa-7f5dfef72014";
     let path = store.join("session.jsonl");
-    std::fs::write(
+    common::write_private_file(
         &path,
         format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"cwd\":\"{checkout}\"}}\n"),
-    )
-    .unwrap();
+    );
     let command = |args: &[&str]| -> Output {
         Command::new(env!("CARGO_BIN_EXE_taskfleet"))
             .args(["--output", "json", "run"])
@@ -700,12 +689,7 @@ fn reservation_precedes_native_file_and_requires_held_matching_fds() {
     let checkout = v["data"]["worktree_path"].as_str().unwrap();
     let native_home = workspace.path().join("native-home");
     let store = native_home.join(".pi/agent/sessions/project");
-    std::fs::create_dir_all(&store).unwrap();
-    std::fs::set_permissions(
-        native_home.join(".pi/agent/sessions"),
-        std::fs::Permissions::from_mode(0o700),
-    )
-    .unwrap();
+    common::create_private_dir_all(&store);
     let id = "b30d3508-a8d4-4aa7-bafa-7f5dfef72014";
     let timestamp = "2026-09-04T10:20:30.123Z";
     let path = store.join(format!(
@@ -866,11 +850,10 @@ fn reservation_precedes_native_file_and_requires_held_matching_fds() {
     .success());
     let pending = command(&["wait", run, "--timeout", "0", "--fail-on-error"]);
     assert_eq!(pending.status.code(), Some(2));
-    std::fs::write(
+    common::write_private_file(
         &path,
         format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"timestamp\":\"{timestamp}\",\"cwd\":\"{checkout}\"}}\n"),
-    )
-    .unwrap();
+    );
     assert!(!command(&[
         "session",
         "bind",
@@ -997,7 +980,7 @@ fn reservation_precedes_native_file_and_requires_held_matching_fds() {
     .success());
     assert!(!invoke("1", true, false).status.success());
     std::fs::rename(&path, store.join("original.jsonl")).unwrap();
-    std::fs::write(&path, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"timestamp\":\"{timestamp}\",\"cwd\":\"{checkout}\"}}\n")).unwrap();
+    common::write_private_file(&path, format!("{{\"type\":\"session\",\"version\":3,\"id\":\"{id}\",\"timestamp\":\"{timestamp}\",\"cwd\":\"{checkout}\"}}\n"));
     assert!(!command(&[
         "session",
         "bind",

@@ -323,12 +323,47 @@ pub struct TestHome {
 impl TestHome {
     /// Create a fresh temp home. Panics on failure (a test cannot proceed
     /// without an isolated home), mirroring the previous
-    /// `TempDir::new().unwrap()` call sites.
+    /// `TempDir::new().unwrap()` call sites. The home is 0700 like a real
+    /// state root, whatever the caller's umask.
     pub fn new() -> Self {
         Self {
-            dir: TempDir::new().expect("create temp TASKFLEET_HOME"),
+            dir: private_tempdir(),
         }
     }
+}
+
+/// A temporary directory with mode 0700 regardless of the caller's umask.
+///
+/// `TempDir::new()` creates `0o777 & !umask`, so a fixture that production
+/// later checks for privacy (state roots, runtime directories, the Pi session
+/// path) would pass under umask 077 and fail under the common 0002. Fixtures
+/// that need a private directory use this instead.
+pub fn private_tempdir() -> TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().expect("create private temp dir");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("chmod private temp dir 0700");
+    dir
+}
+
+/// Create `path` and any missing parents with mode 0700, independent of the
+/// caller's umask.
+pub fn create_private_dir_all(path: &Path) {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+        .expect("create private dir");
+}
+
+/// Write `contents` to `path` with mode 0600, independent of the caller's
+/// umask.
+pub fn write_private_file(path: &Path, contents: impl AsRef<[u8]>) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, contents).expect("write private file");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .expect("chmod private file 0600");
 }
 
 impl Default for TestHome {

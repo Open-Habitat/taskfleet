@@ -267,10 +267,15 @@ symbol leaves any `[`crate::…`]` link to it dangling; this made `main` red onc
 (2026-08-15) after a green test-and-clippy round.
 
 **Linux gate environment.** Use a short private disk-backed `TMPDIR` such as
-`mktemp -d /var/tmp/tfg.XXXXXX` with mode 0700 and `umask 077`. Tests derive
-private runtime directories from it: a long scratch path can exceed the Unix
-socket limit before the intended assertion, while permissive modes correctly
-fail caller writer-fence checks. For the local release gate, prepend the real
+`mktemp -d /var/tmp/tfg.XXXXXX` (mktemp makes it 0700): tests derive runtime
+directories from it, and a long scratch path can exceed the Unix socket limit
+before the intended assertion. The gate must pass under any common umask
+(0002 as well as 077). `tempfile` and `create_dir_all` honour the caller's
+umask, so a fixture that production checks for privacy (a state root, a
+runtime directory, a Pi session path and its ancestors) sets 0700/0600
+explicitly, through `tests/common`'s `private_tempdir`,
+`create_private_dir_all`, and `write_private_file` or
+`run::private_fixture` in unit tests. For the local release gate, prepend the real
 stable toolchain's bin directory (the parent of `rustup which --toolchain stable cargo`)
 to that command's `PATH`; do not route exact-commit validation through a host
 Cargo offload wrapper or change global configuration.
