@@ -3,7 +3,7 @@ created: 2026-11-26
 updated: 2026-11-27
 type: bug
 reporter: agent
-status: open
+status: in-progress
 priority: normal
 provenance: agent
 source_ref: stint:2026-11-26:post-merge-push
