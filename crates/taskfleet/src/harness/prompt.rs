@@ -39,6 +39,12 @@ context for an older run, use `taskfleet run show --current --output json`.
 It resolves the exact canonical worktree-path + branch owner and fails closed on
 missing, duplicate, stale, or malformed evidence.
 
+`taskfleet run merge` is your last command, and this run ends with its report:
+the supervisor tears the worker down as soon as the report lands, so anything
+scheduled after it is killed. Do not push, verify the remote, or plan any step
+after the merge, even if the task asks for one; the merge integrates into the
+local source branch only, and your parent pushes after confirming the landing.
+
 ## Decisions and live replies
 
 When you meet a decision your brief does not settle, ask your parent with a
@@ -195,7 +201,9 @@ Once the report file is written **and committed**, close the loop:
 `taskfleet run merge` rebases + merges this worktree's branch into its source
 branch and submits the terminal report in the same call; the supervisor then tears
 down the worktree, tmux window, and branch. Do **not** run `git worktree remove`,
-`git branch -d`, or `tmux kill-window` yourself.
+`git branch -d`, or `tmux kill-window` yourself. The merge is your last
+command: do not push or check the remote afterwards, because teardown kills
+anything that follows it, and your parent pushes after the landing.
 
 On a merge conflict the call exits non-zero with `error.code: "merge_failed"` and
 submits **no** report. Resolve the conflict, commit, then re-run **only** the
@@ -325,6 +333,32 @@ mod tests {
             )));
             assert!(p.contains("the person never writes to you directly"));
             assert!(!p.contains("{RESIDENT_NAME}") && !p.contains(RUN_ID_SENTINEL));
+        }
+    }
+
+    #[test]
+    fn every_worker_is_told_the_merge_is_its_last_command_and_not_to_push() {
+        // Teardown follows the merge report, so a post-merge push is killed.
+        for harness in ["claude", "pi", "aider"] {
+            for &name in Kind::WIRE_NAMES {
+                let kind: Kind = serde_json::from_value(serde_json::json!(name)).unwrap();
+                let p = worker_prompt_preamble(harness, kind, RUN_ID);
+                let normalized = p.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(
+                    normalized.contains("`taskfleet run merge` is your last command"),
+                    "{harness}/{kind:?}"
+                );
+                assert!(
+                    normalized.contains(
+                        "Do not push, verify the remote, or plan any step after the merge"
+                    ),
+                    "{harness}/{kind:?}"
+                );
+                assert!(
+                    normalized.contains("your parent pushes after confirming the landing"),
+                    "{harness}/{kind:?}"
+                );
+            }
         }
     }
 
