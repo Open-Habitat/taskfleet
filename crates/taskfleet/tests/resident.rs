@@ -401,6 +401,119 @@ fn pi_resident_reports_lands_rebases_and_resumes_the_same_session() {
     assert_eq!(merged["data"]["merged"], true);
     wait_event_count(&f.events(&id), "supervisor.exited", 1);
     assert_eq!(f.show(&id)["status"], "done");
+    assert_no_creating_leftovers(f.home.path(), &id);
+}
+
+/// A terminal run leaves nothing of its own under `.creating`: no Pi message
+/// adapter or socket, no resident round marker, no staging tree, and (once its
+/// evidence is archived) no private Pi session directory. While evidence is
+/// pending the session store is deliberately kept for the retry, and
+/// `run upgrade-lock` ignores it by design.
+fn assert_no_creating_leftovers(home: &Path, id: &str) {
+    assert_no_control_files(home, id);
+    let sessions = home.join(".creating/pi-sessions").join(id);
+    assert!(
+        !sessions.exists(),
+        "terminal run {id} leaked {}",
+        sessions.display()
+    );
+}
+
+fn assert_no_control_files(home: &Path, id: &str) {
+    let creating = home.join(".creating");
+    let mut leaked: Vec<String> = std::fs::read_dir(&creating).map_or_else(
+        |_| Vec::new(),
+        |entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.contains(id))
+                .collect()
+        },
+    );
+    if creating.join("runs").join(id).exists() {
+        leaked.push(format!("runs/{id}"));
+    }
+    assert!(leaked.is_empty(), "terminal run {id} leaked {leaked:?}");
+}
+
+/// Remove the run's live Pi transcript so terminal evidence capture keeps
+/// failing (and the supervisor keeps preserving and retrying), and stand in
+/// for the socket the real Pi adapter would have bound.
+fn break_evidence_and_bind_socket(f: &Fixture, id: &str, attempt: u32) {
+    let sessions = f.home.path().join(".creating/pi-sessions").join(id);
+    for entry in std::fs::read_dir(&sessions).unwrap() {
+        std::fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    std::fs::write(
+        f.home
+            .path()
+            .join(".creating")
+            .join(format!("message-{id}-{attempt}.sock")),
+        "",
+    )
+    .unwrap();
+}
+
+/// A cancelled resident whose terminal evidence cannot be archived: its round
+/// marker, adapter and socket are still removed on the first teardown tick,
+/// while evidence stays pending for retry. Before, all three outlived the run
+/// and `run upgrade-lock` refused on them.
+#[test]
+fn terminal_resident_leaves_no_round_marker_even_when_evidence_is_pending() {
+    let f = Fixture::new("pi");
+    let id = f.create("leaky", &[]);
+    f.report_round(&id, "round one");
+    f.end_attempt(0, 0);
+    f.wait_exit_recorded(&id, 0);
+    let creating = f.home.path().join(".creating");
+    assert!(creating.join(format!("round-{id}-0.reported")).exists());
+    assert!(creating.join(format!("message-{id}.ts")).exists());
+    break_evidence_and_bind_socket(&f, &id, 0);
+    f.ok(&["run", "cancel", &id, "--json"]);
+    wait_event_count(&f.events(&id), "worker.evidence.failed", 1);
+    assert_eq!(f.show(&id)["status"], "cancelled");
+    assert_no_control_files(f.home.path(), &id);
+}
+
+/// A one-shot Pi worker that fails without merging, with evidence capture
+/// failing: the adapter and socket go with the terminal transition, not with
+/// evidence success.
+#[test]
+fn failed_one_shot_pi_run_leaves_no_message_adapter() {
+    let f = Fixture::new("pi");
+    let repo = f.tools.repo_path().to_str().unwrap().to_string();
+    let created = f.ok(&[
+        "--output",
+        "json",
+        "run",
+        "create",
+        "--kind",
+        "spinoff",
+        "--headless",
+        "--title",
+        "one-shot",
+        "--task",
+        "analyse",
+        "--source-branch",
+        "main",
+        "--source-repo",
+        &repo,
+    ]);
+    let id = created["data"]["run_id"].as_str().unwrap().to_string();
+    wait_event_count(&f.events(&id), "supervisor.started", 1);
+    f.argv(0);
+    assert!(f
+        .home
+        .path()
+        .join(".creating")
+        .join(format!("message-{id}.ts"))
+        .exists());
+    break_evidence_and_bind_socket(&f, &id, 0);
+    f.end_attempt(0, 3);
+    wait_event_count(&f.events(&id), "worker.evidence.failed", 1);
+    assert_eq!(f.show(&id)["status"], "failed");
+    assert_no_control_files(f.home.path(), &id);
 }
 
 #[test]
@@ -490,6 +603,8 @@ fn idle_expiry_preserves_unlanded_work_then_goes_dormant_and_revives() {
     assert_eq!(f.show(&id)["resident"]["round_state"], "working");
     f.ok(&["run", "cancel", &id, "--json"]);
     f.end_attempt(1, 0);
+    wait_event_count(&f.events(&id), "supervisor.exited", 1);
+    assert_no_creating_leftovers(f.home.path(), &id);
 }
 
 #[test]
@@ -657,6 +772,7 @@ fn a_dormant_resident_settles_with_its_saved_pane_as_evidence() {
         std::fs::read_to_string(pane).unwrap(),
         "fixture final pane\n"
     );
+    assert_no_creating_leftovers(f.home.path(), &id);
 }
 
 /// Resident names are scoped by (repository, creator session): two

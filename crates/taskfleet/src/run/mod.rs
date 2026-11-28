@@ -12,6 +12,7 @@ pub mod awaiting_input;
 mod caller_create;
 pub(crate) mod caller_discard;
 pub mod cancel;
+pub(crate) mod control_files;
 pub mod create;
 pub mod discard;
 pub mod dto;

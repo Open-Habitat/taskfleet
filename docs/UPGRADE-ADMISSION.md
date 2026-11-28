@@ -67,7 +67,8 @@ live, and no `.creating/message-<id>-<attempt>.sock` still accepts connections.
 Any probe that cannot decide refuses `upgrade_state_unverifiable`; a probe that
 finds a live writer refuses `upgrade_creation_live`. Nothing is deleted: the
 staging tree moves to `abandoned-creations/<id>/run` with its
-`.creating/message-<id>*` files beside it and an `abandoned.json` that records
+`.creating` control files (`message-<id>*`, `round-<id>-*.reported`) beside it
+and an `abandoned.json` that records
 the evidence and the original paths; restore it by renaming back while no
 Taskfleet process uses the state root. The creation's git worktree and branch,
 if the materializer got that far, are left untouched. A worker launcher that
@@ -77,6 +78,14 @@ the moved tree right after the rename, so a handshake that landed in between
 is caught: the tree is renamed back and the gate refuses
 `upgrade_creation_live` with admission still inhibited. An unrecognized
 `.creating` entry is never treated as a creation and still refuses.
+
+A control file whose run is published (`runs/<id>` exists) belongs to that
+run and is never a creation: a live run refuses on its own, and a terminal
+run's adapter, socket, or round marker is an inert leftover that neither a
+plain gate nor the override touches. Terminal teardown removes them; releases
+before that fix could leave them behind. A control file whose run does not
+exist, such as a lone round marker, is an unpublished creation like any other
+and moves aside only under the override.
 
 Every override that accepted something writes
 `upgrade-receipts/<receipt-id>.json` before the activation starts and rewrites

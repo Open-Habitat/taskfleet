@@ -28,7 +28,10 @@
 //! agent or handshake pid, and no Pi message socket that still accepts
 //! connections. Any probe that cannot decide refuses. An abandoned creation is
 //! renamed, not deleted, to `<root>/abandoned-creations/<id>/` together with
-//! its `.creating/message-<id>*` control files and an `abandoned.json` record.
+//! its `.creating` control files (`message-<id>*`, `round-<id>-*`) and an
+//! `abandoned.json` record. A control file whose run is published is that
+//! run's, never a creation: a live run refuses through the run survey, and a
+//! terminal run's leftovers are inert.
 //! A launcher that `workmux add` started outlives a killed creator and holds no
 //! lease; its handshake fails closed once the staging path is gone, and
 //! [`move_aside`] re-probes the moved tree so a handshake that landed between
@@ -106,21 +109,10 @@ fn io_error(path: &Path, e: io::Error) -> CliError {
     CliError::system("admission_lock_io", format!("{}: {e}", path.display()))
 }
 
-/// `message-<id>.ts` or `message-<id>-<attempt>.sock`: Pi adapter files a
-/// launcher writes outside the staging tree so they survive publication.
+/// The run a `.creating` control file (Pi adapter, message socket, resident
+/// round marker) belongs to; see [`crate::run::control_files`].
 fn control_file_run_id(name: &str) -> Option<String> {
-    let rest = name.strip_prefix("message-")?;
-    let id = if let Some(id) = rest.strip_suffix(".ts") {
-        id
-    } else {
-        let stem = rest.strip_suffix(".sock")?;
-        let (id, attempt) = stem.rsplit_once('-')?;
-        if attempt.is_empty() || !attempt.bytes().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
-        id
-    };
-    RunId::parse_str(id).ok().map(|_| id.to_string())
+    crate::run::control_files::run_of(name).map(str::to_owned)
 }
 
 pub(super) fn survey(root: &Path, wait_secs: u64) -> Result<Survey, CliError> {
@@ -337,8 +329,11 @@ fn survey_staging(
             },
         }
     }
-    // A published run's adapter files belong to that run; its liveness is
-    // judged by the run survey and its supervisor removes them at teardown.
+    // A published run's control files belong to that run: its liveness is
+    // judged by the run survey (a live run refuses on its own), and once it is
+    // terminal they are inert leftovers its teardown removes. Releases before
+    // terminal teardown swept them by name could leave them behind, so they
+    // never count as creation state.
     for (id, path) in control {
         if !published.contains(&id) {
             creations.entry(id).or_default().control_files.push(path);
@@ -716,6 +711,10 @@ mod tests {
         assert_eq!(control_file_run_id(&format!("message-{id}-.sock")), None);
         assert_eq!(control_file_run_id(&format!("message-{id}.tsx")), None);
         assert_eq!(control_file_run_id("message-not-a-run.ts"), None);
+        assert_eq!(
+            control_file_run_id(&format!("round-{id}-3.reported")).as_deref(),
+            Some(id)
+        );
         assert_eq!(control_file_run_id("orphan"), None);
     }
 }

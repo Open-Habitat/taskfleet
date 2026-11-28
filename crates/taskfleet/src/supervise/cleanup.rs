@@ -264,6 +264,12 @@ pub fn cleanup_terminal_nodes(paths: &RunPaths) -> bool {
         Ok(Some(_)) => {}
         _ => return false,
     }
+    // The run is terminal, so no attempt has an input channel any more. Its
+    // `.creating` control files are removed first and unconditionally: they
+    // are not evidence, and tying them to evidence success left them behind
+    // whenever capture was skipped, deferred, or the supervisor stopped
+    // before it completed, which then blocked `run upgrade-lock`.
+    remove_terminal_control_files(paths);
     let tmux = tmux_bin();
     let git = git_bin();
     let Ok(nodes) = list_nodes(paths) else {
@@ -293,6 +299,32 @@ pub fn cleanup_terminal_nodes(paths: &RunPaths) -> bool {
             || node.retention_unavailable.is_some();
         evidence_complete && display_settled
     })
+}
+
+/// Remove a terminal run's Pi adapter, message sockets and resident round
+/// markers from `<state root>/.creating`. Only a run published at
+/// `<state root>/runs/<id>` has a state root to sweep; any other layout is
+/// left alone rather than guessing where its `.creating` is.
+fn remove_terminal_control_files(paths: &RunPaths) {
+    let Some(runs) = paths.root.parent() else {
+        return;
+    };
+    if runs.file_name() != Some(std::ffi::OsStr::new("runs")) {
+        return;
+    }
+    let Some(state_root) = runs.parent() else {
+        return;
+    };
+    let removed =
+        crate::run::control_files::remove_for_terminal_run(state_root, paths.run_id.as_str());
+    if !removed.is_empty() {
+        info!(
+            target: "taskfleet::supervise",
+            run_id = %paths.run_id.as_str(),
+            removed = ?removed,
+            "removed terminal run's .creating control files"
+        );
+    }
 }
 
 /// No caller-owned path enters the tmux, workmux or evidence pipeline. A
@@ -2247,6 +2279,44 @@ mod tests {
         assert!(cleanup_terminal_nodes(&paths));
         assert_eq!(events_of_kind(&paths, "cleanup.branch_preserved").len(), 1);
         assert!(tmp.path().exists());
+    }
+
+    /// A terminal node with no Pi evidence projection takes the evidence
+    /// pipeline's early return, which used to skip the adapter removal and
+    /// leak `.creating` entries that then blocked `run upgrade-lock`.
+    #[test]
+    fn terminal_cleanup_removes_control_files_without_evidence() {
+        let tmp = TempDir::new().unwrap();
+        let run_id = "01jxsnap000000000000000000";
+        let other = "01jxsnap000000000000000001";
+        let root = tmp.path().join("runs").join(run_id);
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = RunPaths::new(root, run_id).unwrap();
+        bootstrap(&paths, 1);
+        let creating = tmp.path().join(".creating");
+        std::fs::create_dir_all(&creating).unwrap();
+        let mine = [
+            format!("message-{run_id}.ts"),
+            format!("message-{run_id}-0.sock"),
+            format!("round-{run_id}-0.reported"),
+        ];
+        let foreign = creating.join(format!("message-{other}.ts"));
+        for name in &mine {
+            std::fs::write(creating.join(name), "x").unwrap();
+        }
+        std::fs::write(&foreign, "x").unwrap();
+        report(
+            &paths,
+            "n-0001",
+            json!({"success": false, "summary": "gave up"}),
+        );
+        let node = read_node_opt(&paths, &nid("n-0001")).unwrap().unwrap();
+        assert!(node.evidence.is_none());
+        assert!(cleanup_terminal_nodes(&paths));
+        for name in &mine {
+            assert!(!creating.join(name).exists(), "{name} leaked");
+        }
+        assert!(foreign.exists(), "another run's adapter is not ours");
     }
 
     #[test]

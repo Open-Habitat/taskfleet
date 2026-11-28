@@ -443,3 +443,91 @@ fn abandonment_refuses_live_recorded_pids_unknown_entries_and_reuse() {
     assert!(staged.is_dir());
     assert!(!marker(&home).exists());
 }
+
+/// Write a published run's Pi adapter, message socket and resident round
+/// marker under `.creating`, as a live attempt leaves them.
+fn control_files(home: &TempDir, run_id: &str) -> Vec<PathBuf> {
+    let creating = home.path().join(".creating");
+    std::fs::create_dir_all(&creating).unwrap();
+    let files: Vec<PathBuf> = [
+        format!("message-{run_id}.ts"),
+        format!("message-{run_id}-0.sock"),
+        format!("round-{run_id}-0.reported"),
+    ]
+    .into_iter()
+    .map(|name| creating.join(name))
+    .collect();
+    for file in &files {
+        std::fs::write(file, "").unwrap();
+    }
+    files
+}
+
+/// Control files that terminal runs of earlier releases left behind (done,
+/// failed, cancelled; one-shot and resident) never block activation, while a
+/// live run still refuses on its own and leftovers of a run that does not
+/// exist (a round marker, an empty staging tree) are moved aside only by the
+/// explicit override.
+#[test]
+fn leaked_control_files_of_terminal_runs_do_not_block_activation() {
+    let home = TempDir::new().unwrap();
+    let script = checks_marker(&home);
+    let terminal = create(&home);
+    data_of(&call(&home, &["run", "cancel", &terminal]));
+    let shown = data_of(&call(&home, &["run", "show", &terminal]));
+    assert_eq!(shown["status"], "cancelled", "{shown}");
+    let leaked = control_files(&home, &terminal);
+
+    let data = data_of(&upgrade(&home, &[], &script));
+    assert_eq!(data["quiescent"], true, "{data}");
+    assert!(data["receipt"].is_null());
+    for file in &leaked {
+        assert!(file.exists(), "a plain upgrade mutates nothing: {file:?}");
+    }
+
+    // A live run's round marker is that run's: the run refuses as live, not
+    // as unknown creation state, and no override is needed to say why.
+    let live = create(&home);
+    control_files(&home, &live);
+    let refused = error_of(&upgrade(&home, &[], &script));
+    assert_eq!(refused["code"], "upgrade_not_quiescent", "{refused}");
+    assert_eq!(refused["details"]["run_ids"], serde_json::json!([live]));
+    data_of(&call(&home, &["run", "cancel", &live]));
+
+    // Leftovers of runs that never published: a round marker and an empty
+    // staging directory (a creator killed before it wrote anything).
+    let ghost = "01m5ch0zbz0qn6hbv5cevcqhpj";
+    let marker_file = home
+        .path()
+        .join(".creating")
+        .join(format!("round-{ghost}-2.reported"));
+    std::fs::write(&marker_file, "").unwrap();
+    let empty = "01m5ch0zbz0qn6hbv5cevcqhpk";
+    let staging = home.path().join(".creating/runs").join(empty);
+    std::fs::create_dir_all(&staging).unwrap();
+    let refused = error_of(&upgrade(&home, &[], &script));
+    assert_eq!(refused["code"], "upgrade_state_unverifiable", "{refused}");
+    assert!(marker_file.exists() && staging.exists());
+
+    let data = data_of(&upgrade(&home, &["--abandon-stale-creations"], &script));
+    let abandoned: Vec<&str> = data["abandoned_creations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["creation_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(abandoned, [ghost, empty]);
+    let moved = home.path().join("abandoned-creations");
+    assert!(moved
+        .join(ghost)
+        .join(format!("round-{ghost}-2.reported"))
+        .is_file());
+    assert!(moved.join(empty).join("run").is_dir());
+    assert!(!marker_file.exists() && !staging.exists());
+    // Published runs' control files were never creations.
+    for file in &leaked {
+        assert!(file.exists(), "{file:?}");
+    }
+    assert!(!marker(&home).exists());
+    assert_eq!(data_of(&upgrade(&home, &[], &script))["quiescent"], true);
+}
