@@ -9,15 +9,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- A live autonomous Pi worker that has stopped making progress after its first turn is now surfaced to the parent instead of reading as a healthy pending run (`silent-working-worker`). When the supervisor is alive, the worker has not exited, and the attempt's native transcript has not changed for two hours (`TASKFLEET_NO_PROGRESS_GRACE_SECS` overrides the interval), `run show`, `run list` and `run wait` report `no_progress: true` with a `no_progress_detail` saying since when no progress has been seen (`last_progress_at`) and naming `run attach` to look, `run message` to steer, `run interrupt` for a resident, or `run cancel`. A default `run wait` wakes on it once the interval has passed since the later of the last transcript write and the wait's own start, so waiting again does not return at once; it grades as an error under `--fail-on-error` and `--terminal` ignores it. It only informs: no event is recorded, nothing is killed, the run's status never changes, and the next transcript write clears it. A single long tool call (a multi-hour build) writes nothing until it ends and can show the hint; the long default interval is the guard. Claude workers, caller-owned runs and interactive runs have no such signal.
-
 ### Changed
+
+### Fixed
+<!-- oss-changelog:unreleased-end -->
+
+## [0.23.0] - 2026-11-28
+
+### Added
+
+- A live autonomous Pi worker that has stopped making progress after its first turn is now surfaced to the parent instead of reading as a healthy pending run (`silent-working-worker`). When the supervisor is alive, the worker has not exited, and the attempt's native transcript has not changed for two hours (`TASKFLEET_NO_PROGRESS_GRACE_SECS` overrides the interval), `run show`, `run list` and `run wait` report `no_progress: true` with a `no_progress_detail` saying since when no progress has been seen (`last_progress_at`) and naming `run attach` to look, `run message` to steer, `run interrupt` for a resident, or `run cancel`. A default `run wait` wakes on it once the interval has passed since the later of the last transcript write and the wait's own start, so waiting again does not return at once; it grades as an error under `--fail-on-error` and `--terminal` ignores it. It only informs: no event is recorded, nothing is killed, the run's status never changes, and the next transcript write clears it. A single long tool call (a multi-hour build) writes nothing until it ends and can show the hint; the long default interval is the guard. Claude workers, caller-owned runs and interactive runs have no such signal.
 
 ### Fixed
 
 - Workers are no longer told to push or check the remote after `run merge`, a step that teardown killed silently because the supervisor tears the worker down as soon as the merge report lands (`post-merge-push-killed`). The generated worker preamble and the `worktree-spinoff`, `worktree-merge` and `fan-out` skills now say the merge is the worker's last command and lands on the local source branch only, and `stint-start` tells the conductor to push after confirming the round's landings, under the repository's remote policy. `run merge` itself is unchanged and still does not push.
 - Terminal runs no longer leave their Pi message adapter, message sockets or resident round markers under `.creating`, and such leftovers no longer block `run upgrade-lock` (`leaked-creating-adapters`). Teardown now removes a terminal run's control files on its first tick, whether or not its evidence archive succeeded, was skipped, or is still being retried; before, they were removed only after a successful archive, so a run whose evidence capture failed or whose supervisor stopped early kept them and every fleet upgrade needed hand cleanup. `run upgrade-lock` treats a control file of a published run as that run's (a live run still refuses on its own; a terminal run's leftover is ignored), and a round marker whose run does not exist is an abandoned creation that `--abandon-stale-creations` moves aside like an orphan staging directory, instead of an unknown entry that nothing could clear.
-<!-- oss-changelog:unreleased-end -->
+- Live worker with no progress for days is never surfaced to the parent (`silent-working-worker`).
+- Post-merge push in worker never runs: teardown follows the merge report (`post-merge-push-killed`).
+- Release gate test depends on caller umask (linux_lifetime runtime validation) (`gate-test-umask`).
+- terminal runs leak creating message adapters (`leaked-creating-adapters`).
 
 ## [0.22.0] - 2026-11-26
 
