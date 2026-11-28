@@ -1,9 +1,9 @@
 ---
 created: 2026-10-25
-updated: 2026-11-27
+updated: 2026-11-28
 type: bug
 reporter: agent
-status: open
+status: in-progress
 priority: high
 lane: worker-messaging
 lane_seq: 1
