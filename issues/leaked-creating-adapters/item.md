@@ -3,11 +3,13 @@ created: 2026-10-25
 updated: 2026-11-28
 type: bug
 reporter: agent
-status: in-progress
+status: fixed
 priority: high
 lane: worker-messaging
 lane_seq: 1
 collision: [crates/taskfleet/src/run/spawn.rs, supervise-cleanup]
+closed: 2026-11-28
+closed_by: taskfleet-worker
 ---
 
 # terminal runs leak creating message adapters
