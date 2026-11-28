@@ -11,10 +11,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- A named resident waiting between rounds no longer blocks a fleet upgrade (`resident-waiting-blocks-upgrade`). `run upgrade-lock` now lets the activation through when a resident has reported its round and its worker has exited, with no flag: it stops the resident's old supervisor, keeps its worktree, branch, round marker, Pi message adapter and Pi session exactly as they were, and reports it under `data.waiting_residents` without counting it as an override. The next `run message` resumes the same session with the newly installed release and starts a fresh supervisor (`run merge` and `run reattach` start one too; until then idle expiry waits). A resident mid-round, a creation in progress, anything unreadable, and a declared `--target-state-schema` the resident is not at still refuse, all before anything is stopped. `run message` now takes the worker-admission lock when it resumes a resident, like `run create`, so a resume during an activation is refused with `admission_busy` instead of starting a worker mid-swap.
-
 ### Fixed
 <!-- oss-changelog:unreleased-end -->
+
+## [0.23.1] - 2026-11-28
+
+### Changed
+
+- A named resident waiting between rounds no longer blocks a fleet upgrade (`resident-waiting-blocks-upgrade`). `run upgrade-lock` now lets the activation through when a resident has reported its round and its worker has exited, with no flag: it stops the resident's old supervisor, keeps its worktree, branch, round marker, Pi message adapter and Pi session exactly as they were, and reports it under `data.waiting_residents` without counting it as an override. The next `run message` resumes the same session with the newly installed release and starts a fresh supervisor (`run merge` and `run reattach` start one too; until then idle expiry waits). A resident mid-round, a creation in progress, anything unreadable, and a declared `--target-state-schema` the resident is not at still refuse, all before anything is stopped. `run message` now takes the worker-admission lock when it resumes a resident, like `run create`, so a resume during an activation is refused with `admission_busy` instead of starting a worker mid-swap.
+- Residents waiting between rounds block fleet upgrades (`resident-waiting-blocks-upgrade`).
 
 ## [0.23.0] - 2026-11-28
 
