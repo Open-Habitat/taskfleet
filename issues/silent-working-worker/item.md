@@ -2,7 +2,7 @@
 created: 2026-11-27
 updated: 2026-11-28
 type: bug
-status: open
+status: in-progress
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:silent-working-worker-20261126
