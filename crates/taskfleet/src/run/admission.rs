@@ -21,7 +21,7 @@ use taskfleet_core::STATE_SCHEMA_VERSION;
 use crate::error::CliError;
 use crate::output::{self, OutputFormat, OutputSpec};
 use crate::run::from_core;
-use crate::run::upgrade_survey::{self, Abandoned, LiveRun, Survey, RECEIPT_DIR};
+use crate::run::upgrade_survey::{self, Abandoned, LiveRun, Survey, WaitingResident, RECEIPT_DIR};
 
 const FILE: &str = ".worker-admission.lock";
 const DEFAULT_WAIT: u64 = 10;
@@ -163,6 +163,9 @@ struct UpgradeResult {
     state_schema_version: u32,
     accepted_live_runs: Vec<LiveRun>,
     abandoned_creations: Vec<Abandoned>,
+    /// Resident runs between rounds that crossed the activation untouched
+    /// except for their stopped supervisor; not an override.
+    waiting_residents: Vec<WaitingResident>,
     /// Override receipt under `<root>/upgrade-receipts/`; null when no
     /// override accepted anything.
     receipt: Option<String>,
@@ -255,18 +258,33 @@ fn accept(
         )
         .with_details(serde_json::json!({"run_ids": survey.unverifiable_runs})));
     }
-    if !blockers.is_empty() {
-        let Some(target) = args.target_state_schema else {
-            return Err(CliError::user(
-                "upgrade_target_schema_required",
-                "--allow-live-runs requires --target-state-schema",
-            ));
-        };
+    if !blockers.is_empty() && args.target_state_schema.is_none() {
+        return Err(CliError::user(
+            "upgrade_target_schema_required",
+            "--allow-live-runs requires --target-state-schema",
+        ));
+    }
+    // A waiting resident never blocks, so it needs no flag. When the operator
+    // does declare the target state schema, it is held to it like a live run:
+    // the declaration says the new release continues runs at that schema.
+    if let Some(target) = args.target_state_schema {
+        let blockers: Vec<&String> = blockers
+            .iter()
+            .copied()
+            .chain(survey.waiting_residents.iter().map(|r| &r.run_id))
+            .collect();
         let mismatched: Vec<&String> = survey
             .live
             .iter()
-            .filter(|r| r.state_schemas.iter().any(|v| *v != target))
-            .map(|r| &r.run_id)
+            .map(|r| (&r.run_id, &r.state_schemas))
+            .chain(
+                survey
+                    .waiting_residents
+                    .iter()
+                    .map(|r| (&r.run_id, &r.state_schemas)),
+            )
+            .filter(|(_, schemas)| schemas.iter().any(|v| *v != target))
+            .map(|(id, _)| id)
             .collect();
         if target != STATE_SCHEMA_VERSION || !mismatched.is_empty() {
             return Err(CliError::system(
@@ -333,8 +351,12 @@ pub(super) fn upgrade(
     } else {
         ensure_not_inhibited(&root)?;
     }
-    let survey = upgrade_survey::survey(&root, args.wait_secs)?;
+    let mut survey = upgrade_survey::survey(&root, args.wait_secs)?;
     let proven = accept(&root, &survey, &args)?;
+    // Every refusal is ruled out. Stop the old supervisors of waiting
+    // residents so no process of the old release outlives the activation on
+    // their behalf; a failure here still leaves admission unchanged.
+    upgrade_survey::stop_waiting_supervisors(&mut survey.waiting_residents, args.wait_secs)?;
     let checked = survey.checked_runs;
     let accepted_live_runs = survey.live.clone();
     if !recover {
@@ -385,14 +407,33 @@ pub(super) fn upgrade(
             "abandoned_creations": abandoned.iter().map(|a| &a.creation_id).collect::<Vec<_>>(),
         })
     };
+    let stopped: Vec<&String> = survey
+        .waiting_residents
+        .iter()
+        .filter(|r| r.supervisor_stopped)
+        .map(|r| &r.run_id)
+        .collect();
     let fail = |error: CliError, outcome: &str| -> CliError {
-        if !overridden {
-            return error;
+        let mut details = serde_json::Map::new();
+        if !stopped.is_empty() {
+            details.insert(
+                "stopped_supervisor_run_ids".into(),
+                serde_json::json!(stopped),
+            );
         }
-        // The pre-activation receipt already names every override; a failed
-        // final rewrite must not mask the activation error.
-        let _ = receipt_for(outcome);
-        error.with_details(override_details())
+        if overridden {
+            // The pre-activation receipt already names every override; a
+            // failed final rewrite must not mask the activation error.
+            let _ = receipt_for(outcome);
+            if let serde_json::Value::Object(o) = override_details() {
+                details.extend(o);
+            }
+        }
+        if details.is_empty() {
+            error
+        } else {
+            error.with_details(serde_json::Value::Object(details))
+        }
     };
     let program = &args.argv;
     let mut cmd = Command::new(&program[0]);
@@ -496,6 +537,7 @@ pub(super) fn upgrade(
         state_schema_version: STATE_SCHEMA_VERSION,
         accepted_live_runs,
         abandoned_creations: abandoned,
+        waiting_residents: survey.waiting_residents.clone(),
         receipt,
         predecessor_executables,
     };
@@ -507,6 +549,18 @@ pub(super) fn upgrade(
                     "accepted live run {} ({})",
                     run.run_id,
                     run.reasons.join(", ")
+                );
+            }
+            for resident in &result.waiting_residents {
+                let supervisor = match (resident.supervisor_pid, resident.supervisor_stopped) {
+                    (Some(pid), true) => format!(
+                        "; stopped its supervisor pid {pid}, which its next `run message` restarts"
+                    ),
+                    _ => String::new(),
+                };
+                println!(
+                    "kept waiting resident {} between rounds{supervisor}",
+                    resident.run_id
                 );
             }
             for creation in &result.abandoned_creations {

@@ -8302,6 +8302,7 @@ expression: value
           {
             "command": "taskfleet run upgrade-lock",
             "about": "Exclude new worker admissions and run a trusted fleet activation only when quiescent",
+            "long_about": "Exclude new worker admissions and run a trusted fleet activation only when quiescent.\n\nA named resident waiting between rounds (round reported, worker exited) does not block: its old supervisor is stopped before the activation, its worktree and `.creating` files are kept, and the next `run message` resumes it with the new release. A resident mid-round still blocks.",
             "aliases": [],
             "hidden": false,
             "deprecated": false,
@@ -8434,7 +8435,7 @@ expression: value
                 "short": "h",
                 "long_aliases": [],
                 "short_aliases": [],
-                "help": "Print help",
+                "help": "Print help (see more with '--help')",
                 "value_names": [],
                 "takes_value": false,
                 "multiple": false,

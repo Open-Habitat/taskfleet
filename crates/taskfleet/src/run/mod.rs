@@ -241,6 +241,11 @@ pub enum RunAction {
         skip_materialize: bool,
     },
     /// Exclude new worker admissions and run a trusted fleet activation only when quiescent.
+    ///
+    /// A named resident waiting between rounds (round reported, worker exited)
+    /// does not block: its old supervisor is stopped before the activation, its
+    /// worktree and `.creating` files are kept, and the next `run message`
+    /// resumes it with the new release. A resident mid-round still blocks.
     UpgradeLock {
         /// Maximum seconds to wait for in-flight creations (0–600).
         #[arg(long, value_parser = clap::value_parser!(u64).range(0..=600), default_value_t = 10)]

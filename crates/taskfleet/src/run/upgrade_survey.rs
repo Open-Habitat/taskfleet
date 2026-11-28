@@ -21,6 +21,19 @@
 //! `upgrade_state_schema_incompatible`, flag or not. A run whose supervisor
 //! pid record is unreadable cannot be classified and still refuses.
 //!
+//! **Waiting residents (no flag).** A named resident between rounds (ADR 0003:
+//! its current attempt reported its round, the report is still open, the
+//! worker has a told exit, no agent is live, no merge is in flight) is not a
+//! live run here. Its only process is its supervisor, which would survive the
+//! binary swap (mapped image; it execs no Taskfleet executable while the
+//! resident waits) but would then adjudicate the next round, started by the
+//! new CLI, with the old reducer. So the gate stops it (SIGTERM, graceful)
+//! after every refusal is ruled out and before the inhibit marker, holding the
+//! resident operation lock from the survey until the activation ends; `run
+//! message`'s resume holds admission SH, so no round can start meanwhile, and
+//! restarts a supervisor from the new release. Its `.creating` control files
+//! belong to a published run and are never creation state.
+//!
 //! **Stale creations (`--abandon-stale-creations`).** An unpublished
 //! `.creating/runs/<id>` counts as abandoned only when nothing that could still
 //! write it is alive: admission EX (no creator), its staging `.lock` free, its
@@ -54,6 +67,8 @@ use taskfleet_core::{read_manifest_opt, read_node_opt, NodeId, RunId, RunLock, R
 
 use crate::error::CliError;
 use crate::run::from_core;
+use crate::run::resident::ResidentLock;
+use crate::supervise::watchdog::RecordedStart;
 
 /// Directory under the state root that receives abandoned creations.
 pub(super) const ABANDONED_DIR: &str = "abandoned-creations";
@@ -61,11 +76,21 @@ pub(super) const ABANDONED_DIR: &str = "abandoned-creations";
 /// Directory under the state root that receives override receipts.
 pub(super) const RECEIPT_DIR: &str = "upgrade-receipts";
 
+/// How long a waiting resident's supervisor may take to exit after SIGTERM.
+/// It exits at the end of its current tick, which is well under a second
+/// unless an idle-expiry git operation is in progress.
+const SUPERVISOR_STOP_SECS: u64 = 30;
+
 /// What the exclusive survey found.
 pub(super) struct Survey {
     pub checked_runs: usize,
     /// Published runs that a live upgrade would run alongside.
     pub live: Vec<LiveRun>,
+    /// Resident runs between rounds, which never block an upgrade.
+    pub waiting_residents: Vec<WaitingResident>,
+    /// The resident operation lock of every waiting resident, held until the
+    /// survey is dropped (after the activation).
+    pub _resident_locks: Vec<ResidentLock>,
     /// Published runs whose liveness cannot be classified at all.
     pub unverifiable_runs: Vec<String>,
     /// Unpublished creations keyed by run id.
@@ -84,6 +109,28 @@ pub(super) struct LiveRun {
     /// handshake, `run-worker`, Claude hooks): the old release's path, which
     /// must survive the activation while the run lives.
     pub executables: BTreeSet<String>,
+}
+
+/// A named resident run between rounds (ADR 0003): its worker reported the
+/// round and exited, so no process of the run runs Taskfleet code except its
+/// supervisor, which the gate stops before activation (see
+/// [`stop_waiting_supervisors`]). Its worktree, branch, round marker, Pi
+/// message adapter, and Pi session under `.creating` stay as they are; the
+/// next `run message` resumes it with the then-installed release, which
+/// regenerates the launcher and restarts the supervisor.
+#[derive(Clone, Serialize)]
+pub(super) struct WaitingResident {
+    pub run_id: String,
+    /// Every `schema_version` read from the run's manifest and node.
+    pub state_schemas: BTreeSet<u32>,
+    /// The supervisor that was live at the survey, if any.
+    pub supervisor_pid: Option<u32>,
+    /// Whether the gate stopped that supervisor.
+    pub supervisor_stopped: bool,
+    #[serde(skip)]
+    pub supervisor: Option<(u32, RecordedStart)>,
+    #[serde(skip)]
+    pub paths: RunPaths,
 }
 
 #[derive(Default)]
@@ -117,29 +164,161 @@ fn control_file_run_id(name: &str) -> Option<String> {
 
 pub(super) fn survey(root: &Path, wait_secs: u64) -> Result<Survey, CliError> {
     let deadline = Instant::now() + Duration::from_secs(wait_secs);
-    let (checked_runs, live, unverifiable_runs, published) = survey_runs(root, deadline)?;
+    let (checked_runs, live, waiting_residents, resident_locks, unverifiable_runs, published) =
+        survey_runs(root, deadline)?;
     let creations = survey_staging(root, &published)?;
     Ok(Survey {
         checked_runs,
         live,
+        waiting_residents,
+        _resident_locks: resident_locks,
         unverifiable_runs,
         creations,
     })
 }
 
-type RunSurvey = (usize, Vec<LiveRun>, Vec<String>, BTreeSet<String>);
+type RunSurvey = (
+    usize,
+    Vec<LiveRun>,
+    Vec<WaitingResident>,
+    Vec<ResidentLock>,
+    Vec<String>,
+    BTreeSet<String>,
+);
+
+/// What one shared-locked read of a published run says about its liveness.
+/// Independent facts, one per reason `run upgrade-lock` reports.
+#[allow(clippy::struct_excessive_bools)]
+struct RunFacts {
+    terminal: bool,
+    state_schemas: BTreeSet<u32>,
+    agent_live: bool,
+    merge_pending: bool,
+    /// A resident run between rounds: see [`WaitingResident`].
+    between_rounds: bool,
+    pid_file_exists: bool,
+    record: Option<(u32, RecordedStart)>,
+}
+
+impl RunFacts {
+    fn supervisor_live(&self) -> bool {
+        self.record.as_ref().is_some_and(|(pid, start)| {
+            crate::supervise::pid_file::pid_live_with_identity(*pid, start)
+        })
+    }
+
+    /// Whether the gate may stop this run's supervisor, if any, by pid: no
+    /// live supervisor, or a live one whose kernel start identity (or legacy
+    /// start seconds) positively matches its record, so the signal cannot
+    /// reach a recycled pid.
+    fn supervisor_stoppable(&self) -> bool {
+        match &self.record {
+            None => true,
+            Some((pid, start)) => {
+                !crate::supervise::pid_file::pid_live_with_identity(*pid, start)
+                    || start.matches(*pid) == Some(true)
+            }
+        }
+    }
+}
+
+/// Read one published run under its shared run lock, retrying a busy lock
+/// until `deadline` (a live supervisor holds it briefly and often; never block
+/// on a per-run writer while holding admission EX).
+fn read_run(paths: &RunPaths, id: &str, deadline: Instant) -> Result<RunFacts, CliError> {
+    let lock = loop {
+        if let Some(lock) =
+            RunLock::<Shared>::try_acquire_shared_existing(&paths.lock()).map_err(from_core)?
+        {
+            break lock;
+        }
+        if Instant::now() >= deadline {
+            return Err(unverifiable(format!("busy run {id}; retry")));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let manifest = read_manifest_opt(paths)
+        .map_err(from_core)?
+        .ok_or_else(|| unverifiable(format!("missing manifest for run {id}")))?;
+    let mut state_schemas = BTreeSet::from([manifest.schema_version]);
+    // Terminal status alone is insufficient: merge recovery, live worker
+    // or supervisor teardown may still depend on this binary. Conversely,
+    // settled failed/cancelled work is preserved on disk across upgrades.
+    let mut agent_live = false;
+    let mut merge_pending = false;
+    let mut nodes = Vec::new();
+    for index in 1..=manifest.node_count {
+        let node_id = NodeId::parse_str(&format!("n-{index:04}"))
+            .map_err(|e| unverifiable(format!("run {id} node index {index}: {e}")))?;
+        let node = read_node_opt(paths, &node_id)
+            .map_err(from_core)?
+            .ok_or_else(|| unverifiable(format!("missing {node_id} in run {id}")))?;
+        state_schemas.insert(node.schema_version);
+        agent_live |= node
+            .agent_pid
+            .and_then(|pid| u32::try_from(pid).ok())
+            .is_some_and(|pid| {
+                crate::supervise::pid_file::pid_live_with_identity(
+                    pid,
+                    &RecordedStart::of_agent(&node),
+                )
+            });
+        merge_pending |= node.pending_merge.is_some();
+        nodes.push(node);
+    }
+    let terminal = manifest.status.is_terminal();
+    // Between rounds (ADR 0003): a non-terminal resident whose only node is
+    // not terminal, whose current attempt reported its round (the report is
+    // still open) and has a told exit, with no live agent and no merge in
+    // flight. Told facts only; no process of this run runs Taskfleet code
+    // except its supervisor.
+    let between_rounds = manifest.resident.is_some()
+        && !terminal
+        && !agent_live
+        && !merge_pending
+        && matches!(nodes.as_slice(), [node]
+            if !node.status.is_terminal()
+                && node.worker_exit.is_some()
+                && node
+                    .resident
+                    .as_deref()
+                    .and_then(taskfleet_core::ResidentState::open_round)
+                    .is_some_and(|round| round.attempt == node.retry_attempts));
+    let pid_path = paths.supervisor_pid();
+    let record = crate::supervise::pid_file::read_pid_record(&pid_path);
+    let pid_file_exists = pid_path.exists();
+    drop(lock);
+    Ok(RunFacts {
+        terminal,
+        state_schemas,
+        agent_live,
+        merge_pending,
+        between_rounds,
+        pid_file_exists,
+        record,
+    })
+}
 
 fn survey_runs(root: &Path, deadline: Instant) -> Result<RunSurvey, CliError> {
     let runs = root.join("runs");
     let entries = match std::fs::read_dir(&runs) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Ok((0, Vec::new(), Vec::new(), BTreeSet::new()))
+            return Ok((
+                0,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                BTreeSet::new(),
+            ))
         }
         Err(e) => return Err(io_error(&runs, e)),
     };
     let mut checked = 0;
     let mut live = Vec::new();
+    let mut waiting = Vec::new();
+    let mut resident_locks = Vec::new();
     let mut unverifiable_runs = Vec::new();
     let mut published = BTreeSet::new();
     for entry in entries {
@@ -158,63 +337,51 @@ fn survey_runs(root: &Path, deadline: Instant) -> Result<RunSurvey, CliError> {
         let paths = RunPaths::new(entry.path(), id.clone())
             .map_err(|e| unverifiable(format!("invalid run entry {id}: {e}")))?;
         published.insert(id.clone());
-        // Never block on a per-run writer while holding EX, but a live
-        // supervisor holds its run lock briefly and often: retry until the
-        // caller's admission wait budget runs out.
-        let lock = loop {
-            if let Some(lock) =
-                RunLock::<Shared>::try_acquire_shared_existing(&paths.lock()).map_err(from_core)?
-            {
-                break lock;
-            }
-            if Instant::now() >= deadline {
-                return Err(unverifiable(format!("busy run {id}; retry")));
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let manifest = read_manifest_opt(&paths)
-            .map_err(from_core)?
-            .ok_or_else(|| unverifiable(format!("missing manifest for run {id}")))?;
+        let mut facts = read_run(&paths, &id, deadline)?;
         checked += 1;
-        let mut state_schemas = BTreeSet::from([manifest.schema_version]);
-        // Terminal status alone is insufficient: merge recovery, live worker
-        // or supervisor teardown may still depend on this binary. Conversely,
-        // settled failed/cancelled work is preserved on disk across upgrades.
-        let mut agent_live = false;
-        let mut merge_pending = false;
-        for index in 1..=manifest.node_count {
-            let node_id = NodeId::parse_str(&format!("n-{index:04}"))
-                .map_err(|e| unverifiable(format!("run {id} node index {index}: {e}")))?;
-            let node = read_node_opt(&paths, &node_id)
-                .map_err(from_core)?
-                .ok_or_else(|| unverifiable(format!("missing {node_id} in run {id}")))?;
-            state_schemas.insert(node.schema_version);
-            agent_live |= node
-                .agent_pid
-                .and_then(|pid| u32::try_from(pid).ok())
-                .is_some_and(|pid| {
-                    crate::supervise::pid_file::pid_live_with_identity(
-                        pid,
-                        &crate::supervise::watchdog::RecordedStart::of_agent(&node),
-                    )
-                });
-            merge_pending |= node.pending_merge.is_some();
-        }
-        let pid_path = paths.supervisor_pid();
-        let record = crate::supervise::pid_file::read_pid_record(&pid_path);
-        let supervisor_live = record.as_ref().is_some_and(|(pid, start)| {
-            crate::supervise::pid_file::pid_live_with_identity(*pid, start)
-        });
-        drop(lock);
-        if pid_path.exists() && record.is_none() {
+        if facts.pid_file_exists && facts.record.is_none() {
             unverifiable_runs.push(id);
             continue;
         }
+        let mut resident_busy = false;
+        if facts.between_rounds && facts.supervisor_stoppable() {
+            // Hold the resident operation lock through the activation, so no
+            // `run land` or idle expiry acts on the run meanwhile (`run
+            // message` is already excluded by admission EX). Re-read under it:
+            // an operation that finished between the two reads may have
+            // changed the round.
+            match ResidentLock::try_acquire(&paths)? {
+                Some(lock) => {
+                    facts = read_run(&paths, &id, deadline)?;
+                    if facts.pid_file_exists && facts.record.is_none() {
+                        unverifiable_runs.push(id);
+                        continue;
+                    }
+                    if facts.between_rounds && facts.supervisor_stoppable() {
+                        let supervisor = facts.record.clone().filter(|(pid, start)| {
+                            crate::supervise::pid_file::pid_live_with_identity(*pid, start)
+                        });
+                        waiting.push(WaitingResident {
+                            run_id: id,
+                            state_schemas: facts.state_schemas,
+                            supervisor_pid: supervisor.as_ref().map(|(pid, _)| *pid),
+                            supervisor_stopped: false,
+                            supervisor,
+                            paths,
+                        });
+                        resident_locks.push(lock);
+                        continue;
+                    }
+                }
+                None => resident_busy = true,
+            }
+        }
         let reasons: Vec<&'static str> = [
-            (!manifest.status.is_terminal(), "not_terminal"),
-            (agent_live, "agent_live"),
-            (merge_pending, "merge_pending"),
-            (supervisor_live, "supervisor_live"),
+            (!facts.terminal, "not_terminal"),
+            (facts.agent_live, "agent_live"),
+            (facts.merge_pending, "merge_pending"),
+            (facts.supervisor_live(), "supervisor_live"),
+            (resident_busy, "resident_operation_in_progress"),
         ]
         .into_iter()
         .filter_map(|(hit, reason)| hit.then_some(reason))
@@ -224,12 +391,105 @@ fn survey_runs(root: &Path, deadline: Instant) -> Result<RunSurvey, CliError> {
             live.push(LiveRun {
                 run_id: id,
                 reasons,
-                state_schemas,
+                state_schemas: facts.state_schemas,
                 executables,
             });
         }
     }
-    Ok((checked, live, unverifiable_runs, published))
+    Ok((
+        checked,
+        live,
+        waiting,
+        resident_locks,
+        unverifiable_runs,
+        published,
+    ))
+}
+
+/// Stop the old supervisor of every waiting resident before activation.
+///
+/// Called only after every refusal has been ruled out and while admission EX
+/// and each resident's operation lock are held, so no message, land, or idle
+/// expiry can change a round meanwhile. Each run is re-read first; a run that
+/// left its between-rounds state (a concurrent `run cancel` or `run merge`)
+/// refuses before its supervisor is signalled. SIGTERM is the supervisor's
+/// graceful exit: it finishes its tick, appends `supervisor.exited`, and
+/// removes its pid file; it never terminalizes the run or touches the worktree
+/// or the `.creating` control files. The next `run message` (or `run merge`,
+/// or `run reattach`) starts a supervisor from the new release.
+///
+/// On a refusal the error names every supervisor already stopped; those runs
+/// are still waiting residents and resume the same way.
+pub(super) fn stop_waiting_supervisors(
+    waiting: &mut [WaitingResident],
+    wait_secs: u64,
+) -> Result<(), CliError> {
+    let mut stopped: Vec<String> = Vec::new();
+    let refuse = |error: CliError, stopped: &[String]| {
+        error.with_details(serde_json::json!({ "stopped_supervisor_run_ids": stopped }))
+    };
+    for resident in waiting.iter_mut() {
+        let Some((pid, start)) = resident.supervisor.clone() else {
+            continue;
+        };
+        let deadline = Instant::now() + Duration::from_secs(wait_secs.max(1));
+        let facts = read_run(&resident.paths, &resident.run_id, deadline)
+            .map_err(|e| refuse(e, &stopped))?;
+        if !facts.between_rounds {
+            return Err(refuse(
+                CliError::system(
+                    "upgrade_not_quiescent",
+                    format!(
+                        "resident run {} is no longer waiting between rounds; admission was not changed",
+                        resident.run_id
+                    ),
+                ),
+                &stopped,
+            ));
+        }
+        // Signal only the supervisor the survey saw, still recorded and still
+        // the same process; one that exited meanwhile needs no signal.
+        let target = crate::supervise::pid_file::to_pid_t(pid).filter(|_| {
+            facts.record.as_ref() == Some(&(pid, start.clone())) && start.matches(pid) == Some(true)
+        });
+        if let Some(target) = target {
+            // SAFETY: plain kill(2) on an in-range pid whose start identity
+            // was just matched against the supervisor's own record.
+            if unsafe { libc::kill(target, libc::SIGTERM) } != 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(refuse(
+                        unverifiable(format!(
+                            "signal supervisor pid {pid} of resident run {}: {error}",
+                            resident.run_id
+                        )),
+                        &stopped,
+                    ));
+                }
+            }
+        }
+        let stop_deadline = Instant::now() + Duration::from_secs(SUPERVISOR_STOP_SECS);
+        while crate::supervise::pid_file::pid_live_with_identity(pid, &start) {
+            if Instant::now() >= stop_deadline {
+                return Err(refuse(
+                    CliError::system(
+                        "upgrade_supervisor_stop_timeout",
+                        format!(
+                            "supervisor pid {pid} of waiting resident run {} did not exit within {SUPERVISOR_STOP_SECS}s of SIGTERM; admission was not changed",
+                            resident.run_id
+                        ),
+                    ),
+                    &stopped,
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        if target.is_some() {
+            resident.supervisor_stopped = true;
+            stopped.push(resident.run_id.clone());
+        }
+    }
+    Ok(())
 }
 
 /// The Taskfleet executable each generated `candidate-launch-*.sh` invokes

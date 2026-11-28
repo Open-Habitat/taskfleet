@@ -5,8 +5,8 @@ worker-admission lock, checks existing runs, persists
 `$TASKFLEET_HOME/.worker-admission-inhibited` (including directory fsync), and
 only then starts the activation. A successful synchronous exit clears the
 marker; an error, timeout, or hard-killed Taskfleet process leaves it in place.
-New `run create` and `run reattach` refuse admission while the marker exists,
-even after the flock is released. Do not delete or rename the marker manually.
+New `run create`, `run reattach`, and a `run message` that resumes a resident
+refuse admission while the marker exists, even after the flock is released. Do not delete or rename the marker manually.
 Use the same state root and a Taskfleet release that understands the marker for
 **every** creator: older binaries cannot enforce this fence.
 
@@ -17,6 +17,51 @@ can call `setsid()`, close its inherited flock FD, and continue writing after
 its parent exits. The lock is not process-tree containment. A nonzero exit
 also leaves admission inhibited, even if the installation looks unchanged.
 Keep activation synchronous; no detached installers or post-exit writes.
+
+## Residents waiting between rounds
+
+A named resident (`run create --resident`) whose worker has reported its round
+with `node round-report` and exited (`round_state: waiting` or `dormant` on
+`run show`, `worker_running: false`) does not block activation, and needs no
+flag. No process of such a run runs Taskfleet code except its supervisor,
+which only waits for idle expiry. The gate stops that supervisor with SIGTERM,
+its graceful exit, before persisting the inhibit marker: it finishes its
+current tick, records `supervisor.exited`, and removes its pid file. It never
+ends the run or touches the worktree. The gate holds the resident's operation
+lock through the activation so no `run land` or idle expiry acts on it
+meanwhile, and a `run message` resume holds the admission gate shared, so it
+cannot start a worker during the activation (it fails with `admission_busy`
+or `upgrade_inhibited` and can be retried). The resident's worktree, branch,
+round marker, Pi message adapter and Pi session under `.creating` are left
+exactly as they were.
+
+The next `run message` resumes the same native session with whatever release
+is then installed: it generates the next attempt's launcher (and Claude hooks)
+from the new executable and starts a supervisor from it. `run merge` and
+`run reattach` also start a supervisor; until one of them runs, idle expiry
+does not act on the resident.
+
+The gate stops the old supervisor rather than leaving it running because it
+would otherwise adjudicate the resident's next round with the old reducer
+beside the new CLI, which is exactly the mixed fleet `--allow-live-runs`
+guards with the state schema. The supervisor itself would survive the binary
+swap: it keeps its mapped image and starts no Taskfleet executable while the
+resident waits.
+
+The JSON envelope lists them in `data.waiting_residents[]` (`run_id`,
+`state_schemas`, `supervisor_pid`, `supervisor_stopped`). They are not an
+override: `data.quiescent` stays true and no receipt is written for them. A
+resident still in its round (no report yet, or reported but its worker has
+not exited), one whose operation lock is held by a land or expiry in
+progress, or one whose live supervisor's start identity cannot be verified
+against its pid record still refuses as a live run. When the operator
+declares `--target-state-schema`, a waiting resident whose manifest or node
+is at another schema refuses `upgrade_state_schema_incompatible`. Every such
+refusal is decided before any supervisor is stopped. If a supervisor does not
+exit within 30 seconds the gate refuses `upgrade_supervisor_stop_timeout`
+with admission unchanged; the error's `details.stopped_supervisor_run_ids`
+names the residents whose supervisors were already stopped, which resume the
+same way. A failed activation carries the same field.
 
 ## Operator overrides
 

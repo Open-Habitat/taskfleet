@@ -260,6 +260,14 @@ pub(crate) fn resume(
     wait_exit: Duration,
 ) -> Result<(String, u64, Resumed), CliError> {
     resident::await_worker_exit(paths, node_id, wait_exit)?;
+    // A resume starts a worker attempt like `run create` does, so it is a
+    // participating admission: held shared from here until the attempt is
+    // recorded, it keeps a resume out of a fleet activation's window. That is
+    // what lets `run upgrade-lock` pass a resident waiting between rounds
+    // (`run/upgrade_survey.rs`). Lock order: admission before the resident
+    // and run locks; taken after the exit wait so a slow worker exit does not
+    // hold an upgrade off.
+    let _admission = crate::run::admission::admit(root)?;
     let _lock = ResidentLock::acquire(paths, Duration::from_secs(30))?;
     let (manifest, node) = resident::await_worker_exit(paths, node_id, Duration::ZERO)?;
     crate::run::require_writer_fence(&manifest)?;

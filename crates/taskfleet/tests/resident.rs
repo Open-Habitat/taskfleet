@@ -1081,3 +1081,210 @@ fn claude_resident_interrupt_uses_sigint_and_resumes_the_session() {
     f.ok(&["run", "cancel", &id, "--json"]);
     f.end_attempt(1, 0);
 }
+
+impl Fixture {
+    /// Run `run upgrade-lock` with an activation that succeeds only while the
+    /// inhibit marker excludes admission, plus `extra` shell in front of it.
+    fn upgrade(&self, flags: &[&str], extra: &str) -> std::process::Output {
+        let marker = self.home.path().join(".worker-admission-inhibited");
+        let script = format!("{extra}test -f '{}'", marker.display());
+        let mut args = vec!["--json", "run", "upgrade-lock", "--wait-secs", "5"];
+        args.extend_from_slice(flags);
+        args.extend_from_slice(&["--", "/bin/sh", "-c", &script]);
+        self.cmd().args(&args).output().unwrap()
+    }
+
+    /// A resident that reported round one and whose worker exited.
+    fn waiting(&self, name: &str) -> String {
+        let id = self.create(name, &[]);
+        self.argv(0);
+        self.commit("ROUND1", "first round");
+        self.report_round(&id, "round one");
+        self.end_attempt(0, 0);
+        self.wait_exit_recorded(&id, 0);
+        assert_eq!(self.show(&id)["resident"]["round_state"], "waiting");
+        id
+    }
+
+    fn supervisor_live(&self, id: &str) -> bool {
+        self.show(id)["supervisor"]["alive"] == true
+    }
+}
+
+fn refusal(out: &std::process::Output) -> Value {
+    assert!(
+        !out.status.success(),
+        "upgrade unexpectedly succeeded: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    serde_json::from_slice::<Value>(&out.stderr)
+        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))["error"]
+        .clone()
+}
+
+/// The `.creating` files a waiting Pi resident keeps between rounds, with
+/// their bytes: the round marker, the message adapter, a stale socket path
+/// the real adapter leaves, and the private Pi session.
+fn kept_files(home: &Path, id: &str) -> Vec<(PathBuf, Vec<u8>)> {
+    let creating = home.join(".creating");
+    let socket = creating.join(format!("message-{id}-0.sock"));
+    if !socket.exists() {
+        std::fs::write(&socket, "").unwrap();
+    }
+    let mut files = vec![
+        creating.join(format!("round-{id}-0.reported")),
+        creating.join(format!("message-{id}.ts")),
+        socket,
+    ];
+    for entry in std::fs::read_dir(creating.join("pi-sessions").join(id)).unwrap() {
+        files.push(entry.unwrap().path());
+    }
+    files
+        .into_iter()
+        .map(|path| {
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("{} missing before upgrade: {e}", path.display()));
+            (path, bytes)
+        })
+        .collect()
+}
+
+/// A resident waiting between rounds does not block a fleet upgrade: the gate
+/// stops its old supervisor, keeps its worktree and `.creating` files exactly
+/// as they were, holds a `run message` off while the activation runs, and the
+/// next message after the upgrade resumes the same session with a supervisor
+/// started by the then-installed binary.
+#[test]
+fn waiting_resident_lets_upgrade_through_and_resumes_after_it() {
+    let f = Fixture::new("pi");
+    let id = f.waiting("helper");
+    let session = flag_value(&f.argv(0), "--session").to_string();
+    let kept = kept_files(f.home.path(), &id);
+    assert!(f.supervisor_live(&id));
+
+    // The activation tries to resume the resident mid-upgrade; admission is
+    // held exclusively, so the message is refused and starts no attempt.
+    let probe = f.ctrl.path().join("message-during-activation.json");
+    let during = format!(
+        "'{}' --json run message {id} 'too early' 2> '{}' && exit 9; ",
+        env!("CARGO_BIN_EXE_taskfleet"),
+        probe.display()
+    );
+    let out = f.upgrade(&[], &during);
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let data = serde_json::from_slice::<Value>(&out.stdout).unwrap()["data"].clone();
+    assert_eq!(data["quiescent"], true, "{data}");
+    assert!(data["receipt"].is_null());
+    assert_eq!(data["accepted_live_runs"], serde_json::json!([]));
+    assert_eq!(data["waiting_residents"][0]["run_id"], id);
+    assert_eq!(data["waiting_residents"][0]["supervisor_stopped"], true);
+    let busy: Value = serde_json::from_slice(&std::fs::read(&probe).unwrap()).unwrap();
+    assert_eq!(busy["error"]["code"], "admission_busy", "{busy}");
+    assert!(!f.ctrl.path().join("argv-1").exists());
+    assert!(!f.home.path().join(".worker-admission-inhibited").exists());
+
+    // Nothing of the resident changed but its stopped supervisor.
+    wait_event_count(&f.events(&id), "supervisor.exited", 1);
+    assert!(!f.supervisor_live(&id));
+    for (path, bytes) in &kept {
+        assert_eq!(
+            std::fs::read(path).ok().as_ref(),
+            Some(bytes),
+            "{} changed across the upgrade",
+            path.display()
+        );
+    }
+    assert!(f.worktree.join("ROUND1").exists());
+    let shown = f.show(&id);
+    assert_eq!(shown["status"], "pending");
+    assert_eq!(shown["resident"]["round_state"], "waiting");
+
+    // The next message resumes the same native session and brings up a
+    // supervisor again.
+    let msg = f.ok(&["run", "message", &id, "round two please", "--json"]);
+    assert_eq!(msg["data"]["delivery"], "resumed");
+    assert_eq!(msg["data"]["resumed"]["attempt"], 1);
+    let second = f.argv(1);
+    assert_eq!(flag_value(&second, "--session"), session);
+    assert!(second.last().unwrap().contains("round two please"));
+    wait_event_count(&f.events(&id), "supervisor.started", 2);
+    assert!(f.supervisor_live(&id));
+
+    // Mid-round, the same resident blocks the upgrade again.
+    let refused = refusal(&f.upgrade(&[], ""));
+    assert_eq!(refused["code"], "upgrade_not_quiescent", "{refused}");
+    assert_eq!(refused["details"]["run_ids"], serde_json::json!([id]));
+    assert!(f.supervisor_live(&id));
+
+    f.ok(&["run", "cancel", &id, "--json"]);
+    f.end_attempt(1, 0);
+}
+
+/// A resident still in its round refuses: before its report, and after the
+/// report while the worker process has not exited yet.
+#[test]
+fn mid_round_resident_still_refuses_upgrade() {
+    let f = Fixture::new("pi");
+    let id = f.create("busy", &[]);
+    f.argv(0);
+    let refused = refusal(&f.upgrade(&[], ""));
+    assert_eq!(refused["code"], "upgrade_not_quiescent", "{refused}");
+    assert_eq!(refused["details"]["run_ids"], serde_json::json!([id]));
+
+    f.report_round(&id, "round one");
+    let refused = refusal(&f.upgrade(&[], ""));
+    assert_eq!(refused["code"], "upgrade_not_quiescent", "{refused}");
+    let reasons = &refused["details"]["runs"][0]["reasons"];
+    assert!(
+        reasons
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == "agent_live"),
+        "{refused}"
+    );
+    assert!(f.supervisor_live(&id));
+    assert!(!f.home.path().join(".worker-admission-inhibited").exists());
+
+    f.ok(&["run", "cancel", &id, "--json"]);
+    f.end_attempt(0, 0);
+}
+
+/// Refusals that still apply beside a waiting resident (an unpublished
+/// creation, a declared target state schema the resident is not at) are
+/// decided before anything is touched: its supervisor keeps running and
+/// admission is unchanged.
+#[test]
+fn refusals_beside_a_waiting_resident_touch_nothing() {
+    let f = Fixture::new("pi");
+    let id = f.waiting("idle");
+
+    let staging = f
+        .home
+        .path()
+        .join(".creating/runs/01m5ch0zbz0qn6hbv5cevcqhpk");
+    std::fs::create_dir_all(&staging).unwrap();
+    let refused = refusal(&f.upgrade(&[], ""));
+    assert_eq!(refused["code"], "upgrade_state_unverifiable", "{refused}");
+    assert!(f.supervisor_live(&id));
+    std::fs::remove_dir(&staging).unwrap();
+
+    let refused = refusal(&f.upgrade(&["--allow-live-runs", "--target-state-schema", "2"], ""));
+    assert_eq!(
+        refused["code"], "upgrade_state_schema_incompatible",
+        "{refused}"
+    );
+    assert_eq!(
+        refused["details"]["mismatched_run_ids"],
+        serde_json::json!([id])
+    );
+    assert!(f.supervisor_live(&id));
+    assert!(!f.home.path().join(".worker-admission-inhibited").exists());
+
+    f.ok(&["run", "cancel", &id, "--json"]);
+}
