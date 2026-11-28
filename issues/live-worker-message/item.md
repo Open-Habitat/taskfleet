@@ -1,15 +1,17 @@
 ---
 created: 2026-10-21
-updated: 2026-10-25
+updated: 2026-11-28
 type: feature
 reporter: jari
-status: open
+status: done
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:oh-wrapup-20261021-tf-message
 lane: worker-messaging
 lane_seq: 2
 collision: [crates/taskfleet/src/run/spawn.rs, crates/taskfleet/src/run/message.rs]
+closed: 2026-11-28
+closed_by: pi-conductor
 ---
 
 # Send a message to a live worker run (run message / node message)
@@ -47,3 +49,9 @@ Observed during the approved six-issue Taskfleet stint on 2026-10-22 against ins
 ### 2026-10-25T09:40:27Z · @jari
 
 Accepted 2026-10-25: harvest Claude steering from preserved run 01m5maedhkbayn3g7js0g0t9ep (branch wt/7js0g0t9ep-run-message-idle-workers, gate passed on 2eabf667) onto current main after 0.17.1; Pi steering already landed separately.
+
+## Resolution
+
+### 2026-11-28T06:27:01Z · @pi-conductor
+
+Pi steering shipped (run message with the acknowledged adapter, including pending native Pi workers in 8ce69ccd); residents receive messages between rounds for Claude too. The preserved Claude branch from run 01m5maedhkbayn3g7js0g0t9ep no longer exists. Live Claude steering mid-turn gets its own issue if a real need appears (Jari 28.11.2026).

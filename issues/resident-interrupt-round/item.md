@@ -1,12 +1,14 @@
 ---
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-28
 type: feature
 reporter: jari
-status: open
+status: done
 priority: normal
 lane: resident
 lane_seq: 2
+closed: 2026-11-28
+closed_by: pi-conductor
 ---
 
 # Interrupt a resident worker's current round without ending the run
@@ -36,3 +38,9 @@ person's button in Open Habitat; Habitat only teaches its agent the command.
 
 - [ ] `run interrupt` stops a resident Pi and Claude worker's current turn; worktree, branch, session kept; `run message` resumes it.
 - [ ] `run wait` and `run show` report the interrupted round distinctly.
+
+## Resolution
+
+### 2026-11-28T06:27:01Z · @pi-conductor
+
+Implemented in d3fb00bc and released in v0.20.0 (taskfleet run interrupt); result.md records the design. Only the closure was missing (Jari 28.11.2026).

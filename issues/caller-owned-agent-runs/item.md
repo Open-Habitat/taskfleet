@@ -1,15 +1,17 @@
 ---
 created: 2026-10-04
-updated: 2026-10-16
+updated: 2026-11-28
 type: feature
 reporter: jari
-status: in-progress
+status: wontfix
 priority: normal
 provenance: chat
 source_ref: native-agent-host:decide-taskfleet-browser-integration
 lane: merge
 lane_seq: 20
 collision: [supervise-cleanup]
+closed: 2026-11-28
+closed_by: pi-conductor
 ---
 
 # Support worktree runs with caller-owned agents
@@ -57,3 +59,9 @@ Caller-owned runs must not invoke workmux at all, including create, retry, merge
 ### 2026-10-16T06:20:27Z · @jari
 
 Open Habitat decision, 2026-10-16: its current feature observes ordinary Taskfleet-owned spinoffs read-only; browser-controlled caller-owned worktree agents are deferred in that consumer (ADR 0017). This does not cancel Taskfleet work already underway. The supervisor/worker lifetime requirement for ordinary spinoffs is now tracked separately in @linux-independent-user-unit, with attribution in @created-by-session, transcript discovery in @run-transcript-paths and retained history in @terminal-run-history-contract. caller-owned-agent-runs is no longer a prerequisite for Open Habitat spinoff observation.
+
+## Resolution
+
+### 2026-11-28T06:27:01Z · @pi-conductor
+
+Closed by Jari 28.11.2026: the only consumer, Open Habitat, deferred browser-controlled caller-owned worktree agents (ADR 0017), and nobody else needs them. What landed (--agent-owner caller, fenced settlement commands) stays; the missing host launch gate and inherited writer lease are reopened here if Open Habitat takes the feature up again.
