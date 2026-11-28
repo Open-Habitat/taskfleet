@@ -81,3 +81,12 @@ Integration tests through the production binary (`crates/taskfleet/tests/run_wai
   worker is hung.
 - **Grades as an error under `--fail-on-error`**, consistent with
   `startup_blocked`.
+
+## Gate
+
+`scripts/validate-local-release.sh` passed on commit 641895f3 under umask 0002
+and under umask 077. One earlier 077 run failed in an unrelated test,
+`telemetry_contract::accepted_reference_trace_payloads_fit_the_real_endpoint`
+(`sample` read `clock_unreliable` instead of `current` for
+`event-storm-single-flight-coalescing`); it passed five isolated reruns and the
+full gate rerun, so it reads as a load-timing flake outside this change.

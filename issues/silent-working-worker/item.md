@@ -2,11 +2,13 @@
 created: 2026-11-27
 updated: 2026-11-28
 type: bug
-status: in-progress
+status: fixed
 priority: normal
 provenance: agent:homebase-wrapup
 source_ref: agent:homebase-wrapup/reporter:jari/id:silent-working-worker-20261126
 lane: run-health
+closed: 2026-11-28
+closed_by: taskfleet-worker
 ---
 
 # Live worker with no progress for days is never surfaced to the parent
