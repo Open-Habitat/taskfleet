@@ -113,4 +113,5 @@ materializer, launcher, run-worker shim, supervisor):
   naming the resident; in both the supervisor keeps running and no marker is
   left.
 
-Gate: `scripts/validate-local-release.sh` (see the final report for the run).
+Gate: `scripts/validate-local-release.sh` passed on `fd4863cc` under umask 0002
+and umask 077 (1381 tests run, 1381 passed, 1 skipped).

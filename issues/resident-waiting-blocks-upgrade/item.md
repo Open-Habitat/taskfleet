@@ -3,11 +3,13 @@ created: 2026-11-28
 updated: 2026-11-28
 type: improvement
 reporter: jari
-status: in-progress
+status: done
 priority: normal
 provenance: chat
 source_ref: chat:taskfleet-conductor/2026-11-28/resident-blocks-upgrade
 lane: run-health
+closed: 2026-11-28
+closed_by: taskfleet-worker
 ---
 
 # Residents waiting between rounds block fleet upgrades
