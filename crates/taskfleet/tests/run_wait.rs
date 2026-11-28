@@ -1422,12 +1422,14 @@ fn silent_live_worker_is_surfaced_once_and_clears_on_progress() {
     assert_eq!(detail["interval_secs"], 300);
     let silent = detail["silent_secs"].as_i64().unwrap();
     assert!((600..700).contains(&silent), "{detail}");
-    let last: jiff::Timestamp = detail["last_progress_at"]
+    let last_progress: jiff::Timestamp = detail["last_progress_at"]
         .as_str()
         .unwrap()
         .parse()
         .unwrap();
-    let age = jiff::Timestamp::now().duration_since(last).as_secs();
+    let age = jiff::Timestamp::now()
+        .duration_since(last_progress)
+        .as_secs();
     assert!((600..700).contains(&age), "{detail}");
     let hint = detail["resume_hint"].as_str().unwrap();
     assert!(

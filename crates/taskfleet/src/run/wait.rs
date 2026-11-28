@@ -514,7 +514,9 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             latched.caller = None;
             latched.ask = None;
             latched.startup_woke = false;
-            latched.no_progress_woke = false;
+            if let Some(hint) = latched.no_progress.as_mut() {
+                hint.woke = false;
+            }
         }
         let mut outcome = read_outcome(run_id, paths, latched)?;
         if args.check_in.is_some() {
@@ -634,7 +636,6 @@ fn wait_loop(
                 startup: settle.startup.clone(),
                 startup_woke: settle.startup_woke,
                 no_progress: settle.no_progress.clone(),
-                no_progress_woke: settle.no_progress_woke,
             };
             // A run is settled when it reaches a terminal status, OR when it is
             // stalled (a supervisor that died — before creating any node, or
@@ -651,7 +652,7 @@ fn wait_loop(
                         || settle.round.is_some()
                         || settle.ask.is_some()
                         || settle.startup_woke
-                        || settle.no_progress_woke
+                        || settle.no_progress.as_ref().is_some_and(|h| h.woke)
                         || settle.awaiting_input.is_some()
                         || settle
                             .caller
@@ -779,10 +780,15 @@ struct Settle {
     startup_woke: bool,
     /// The live worker has made no observable progress for the interval (see
     /// [`crate::run::no_progress`]); below startup-blocked.
-    no_progress: Option<crate::run::no_progress::NoProgressView>,
-    /// Whether that hint wakes this wait now
-    /// ([`crate::run::no_progress::wakes_wait`]).
-    no_progress_woke: bool,
+    no_progress: Option<NoProgress>,
+}
+
+/// A visible no-progress hint and whether it wakes this wait now
+/// ([`crate::run::no_progress::wakes_wait`]).
+#[derive(Clone)]
+struct NoProgress {
+    view: crate::run::no_progress::NoProgressView,
+    woke: bool,
 }
 
 /// The two non-terminal settle verdicts a poll can latch for a run — the stall
@@ -802,8 +808,7 @@ struct LatchedSettle {
     ask: Option<u64>,
     startup: Option<crate::run::startup::StartupBlockedView>,
     startup_woke: bool,
-    no_progress: Option<crate::run::no_progress::NoProgressView>,
-    no_progress_woke: bool,
+    no_progress: Option<NoProgress>,
 }
 
 /// Read a run's [`Settle`] snapshot under the shared lock. `None` when the run
@@ -917,11 +922,12 @@ fn current_settle(
                 now,
             )
         });
-        let no_progress_woke = silent_since
-            .is_some_and(|since| crate::run::no_progress::wakes_wait(since, wait_started_at, now));
         let no_progress = silent_since
             .zip(node.as_ref())
-            .map(|(since, n)| crate::run::no_progress::NoProgressView::build(&m, n, since, now));
+            .map(|(since, n)| NoProgress {
+                view: crate::run::no_progress::NoProgressView::build(&m, n, since, now),
+                woke: crate::run::no_progress::wakes_wait(since, wait_started_at, now),
+            });
         Ok(Some(Settle {
             status: m.status,
             stall,
@@ -935,7 +941,6 @@ fn current_settle(
             startup,
             startup_woke,
             no_progress,
-            no_progress_woke,
         }))
     })
     .map_err(from_core)
@@ -1110,12 +1115,10 @@ fn read_outcome(
         latched.startup.clone()
     };
     let settled_startup_blocked = startup_blocked_detail.is_some() && latched.startup_woke;
-    let no_progress_detail = if status.is_terminal() {
-        None
-    } else {
-        latched.no_progress.clone()
+    let (no_progress_detail, settled_no_progress) = match &latched.no_progress {
+        Some(hint) if !status.is_terminal() => (Some(hint.view.clone()), hint.woke),
+        _ => (None, false),
     };
-    let settled_no_progress = no_progress_detail.is_some() && latched.no_progress_woke;
     // `error` explains a non-`done` settle. For failed/cancelled the §7.3 report
     // has no dedicated error field, so surface the cancel `reason` when present;
     // for a stalled settle (a `pending`/`running` run graded as a failure under
