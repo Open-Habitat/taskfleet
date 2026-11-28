@@ -3,7 +3,7 @@ created: 2026-11-28
 updated: 2026-11-28
 type: improvement
 reporter: jari
-status: open
+status: in-progress
 priority: normal
 provenance: chat
 source_ref: chat:taskfleet-conductor/2026-11-28/resident-blocks-upgrade
