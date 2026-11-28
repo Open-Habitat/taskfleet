@@ -24,6 +24,7 @@ pub mod list;
 pub mod merge;
 pub mod merge_recovery;
 pub mod message;
+pub mod no_progress;
 pub mod ownership;
 pub mod reattach;
 pub mod resident;
@@ -578,7 +579,8 @@ pub enum RunAction {
         check_in: Option<Duration>,
         /// Wait only for terminal status, ignoring non-terminal attention signals
         /// (including awaiting input, worker questions, and a worker blocked
-        /// before its first turn, `startup_blocked`). Default wait still
+        /// before its first turn, `startup_blocked`, or a live worker with no
+        /// transcript progress for the interval, `no_progress`). Default wait still
         /// wakes for attention, and at once for an open `node ask` question
         /// (`asked: true`, `open_ask`): answer it with `run answer`.
         #[arg(long)]

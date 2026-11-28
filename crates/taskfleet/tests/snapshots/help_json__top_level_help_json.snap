@@ -8912,7 +8912,7 @@ expression: value
                 "long": "terminal",
                 "long_aliases": [],
                 "short_aliases": [],
-                "help": "Wait only for terminal status, ignoring non-terminal attention signals (including awaiting input, worker questions, and a worker blocked before its first turn, `startup_blocked`). Default wait still wakes for attention, and at once for an open `node ask` question (`asked: true`, `open_ask`): answer it with `run answer`",
+                "help": "Wait only for terminal status, ignoring non-terminal attention signals (including awaiting input, worker questions, and a worker blocked before its first turn, `startup_blocked`, or a live worker with no transcript progress for the interval, `no_progress`). Default wait still wakes for attention, and at once for an open `node ask` question (`asked: true`, `open_ask`): answer it with `run answer`",
                 "value_names": [],
                 "takes_value": false,
                 "multiple": false,

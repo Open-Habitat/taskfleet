@@ -1216,6 +1216,16 @@ impl Drop for StandIn {
 /// node projection is patched like [`stamp_clean_worker_exit`]. Returns the
 /// stand-in and the transcript path.
 fn forge_startup_blocked(home: &TempDir, run_id: &str) -> (StandIn, std::path::PathBuf) {
+    forge_live_pi_worker(home, run_id, false)
+}
+
+/// [`forge_startup_blocked`], optionally with a transcript already past its
+/// first turn (an entry after Taskfleet's header).
+fn forge_live_pi_worker(
+    home: &TempDir,
+    run_id: &str,
+    past_first_turn: bool,
+) -> (StandIn, std::path::PathBuf) {
     add_node(home, run_id, "n-0001");
     let child = Command::new("sleep")
         .arg("300")
@@ -1231,14 +1241,14 @@ fn forge_startup_blocked(home: &TempDir, run_id: &str) -> (StandIn, std::path::P
     let relative = format!(".creating/pi-sessions/{run_id}/pi-session-{session_id}.jsonl");
     let transcript = home.path().join(&relative);
     std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
-    std::fs::write(
-        &transcript,
-        format!(
-            "{}\n",
-            json!({"type": "session", "version": 3, "id": session_id, "cwd": "/work/wt"})
-        ),
-    )
-    .unwrap();
+    let mut body = format!(
+        "{}\n",
+        json!({"type": "session", "version": 3, "id": session_id, "cwd": "/work/wt"})
+    );
+    if past_first_turn {
+        body.push_str("{\"type\":\"message\"}\n");
+    }
+    std::fs::write(&transcript, body).unwrap();
 
     let node_path = run_dir.join("nodes").join("n-0001.json");
     let mut n: Value = serde_json::from_slice(&std::fs::read(&node_path).unwrap()).unwrap();
@@ -1365,4 +1375,171 @@ fn startup_blocked_worker_wakes_default_wait_and_clears_on_first_turn() {
         2,
     );
     assert_eq!(quiet["data"]["runs"][0]["startup_blocked"], false);
+}
+
+/// Set a file's modification time `secs` seconds into the past.
+fn age_file(path: &std::path::Path, secs: u64) {
+    let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs))
+        .unwrap();
+}
+
+fn show_json(home: &TempDir, run: &str, interval: &str) -> Value {
+    run_ok(
+        bin(home)
+            .env("TASKFLEET_NO_PROGRESS_GRACE_SECS", interval)
+            .env("TASKFLEET_STARTUP_BLOCKED_GRACE_SECS", "100000")
+            .args(["--output", "json", "run", "show", run]),
+    )
+}
+
+/// A live Pi worker past its first turn whose transcript has been silent for
+/// the no-progress interval is a read-time `no_progress` hint on show/list
+/// naming since when no progress was seen; it is absent before the interval
+/// and before the first turn, wakes a default wait once without
+/// terminalizing anything, and clears as soon as the transcript is written.
+#[test]
+fn silent_live_worker_is_surfaced_once_and_clears_on_progress() {
+    let home = TestHome::new();
+    let run = pending_run(&home, "silent-worker");
+    let (_stand_in, transcript) = forge_live_pi_worker(&home, &run, true);
+    age_file(&transcript, 600);
+
+    // Before the interval: a healthy pending run.
+    let quiet = show_json(&home, &run, "3600");
+    assert_eq!(quiet["data"]["no_progress"], false, "{quiet}");
+    assert!(quiet["data"].get("no_progress_detail").is_none());
+
+    // After the interval: surfaced with since-when, nothing else changes.
+    let show = show_json(&home, &run, "300");
+    let data = &show["data"];
+    assert_eq!(data["no_progress"], true, "{data}");
+    assert_eq!(data["status"], "pending");
+    assert_eq!(data["stalled"], false);
+    assert_eq!(data["attention_required"], false);
+    assert_eq!(data["startup_blocked"], false);
+    let detail = &data["no_progress_detail"];
+    assert_eq!(detail["interval_secs"], 300);
+    let silent = detail["silent_secs"].as_i64().unwrap();
+    assert!((600..700).contains(&silent), "{detail}");
+    let last: jiff::Timestamp = detail["last_progress_at"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let age = jiff::Timestamp::now().duration_since(last).as_secs();
+    assert!((600..700).contains(&age), "{detail}");
+    let hint = detail["resume_hint"].as_str().unwrap();
+    assert!(
+        hint.contains(&format!("taskfleet run attach '{run}'")),
+        "{hint}"
+    );
+    assert!(hint.contains(&format!("run cancel '{run}'")), "{hint}");
+    let list = run_ok(
+        bin(&home)
+            .env("TASKFLEET_NO_PROGRESS_GRACE_SECS", "300")
+            .args(["--output", "json", "run", "list"]),
+    );
+    let row = list["data"]["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["run_id"] == run)
+        .unwrap();
+    assert_eq!(row["no_progress"], true, "{row}");
+
+    // A default wait wakes once its own interval has passed (anchored at the
+    // later of the last write and the wait start), grading as exit 3 under
+    // --fail-on-error without terminalizing the run.
+    let start = std::time::Instant::now();
+    let woke = run_exit(
+        bin(&home)
+            .env("TASKFLEET_NO_PROGRESS_GRACE_SECS", "1")
+            .args([
+                "--output",
+                "json",
+                "run",
+                "wait",
+                &run,
+                "--timeout",
+                "30s",
+                "--fail-on-error",
+            ]),
+        3,
+    );
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= std::time::Duration::from_secs(1)
+            && elapsed < std::time::Duration::from_secs(10),
+        "wait must wake one interval after it began, took {elapsed:?}"
+    );
+    let r = &woke["data"]["runs"][0];
+    assert_eq!(woke["data"]["outcome"], "condition-met");
+    assert_eq!(r["status"], "pending", "{r}");
+    assert_eq!(r["no_progress"], true, "{r}");
+    assert_eq!(
+        r["error"],
+        "live worker has written nothing to its transcript for the no-progress interval; it may be hung"
+    );
+
+    // Exactly once: a re-wait in the same idle period does not return at
+    // once; it still shows the hint when it times out. --terminal ignores it.
+    for extra in [&[][..], &["--terminal"][..]] {
+        let again = run_exit(
+            bin(&home)
+                .env("TASKFLEET_NO_PROGRESS_GRACE_SECS", "2")
+                .args([
+                    "--output",
+                    "json",
+                    "run",
+                    "wait",
+                    &run,
+                    "--timeout",
+                    "600ms",
+                ])
+                .args(extra),
+            2,
+        );
+        let r = &again["data"]["runs"][0];
+        assert_eq!(r["no_progress"], true, "{r}");
+        assert!(r["error"].is_null(), "{r}");
+    }
+
+    // Progress resumes: any transcript write clears the hint everywhere.
+    let mut bytes = std::fs::read(&transcript).unwrap();
+    bytes.extend_from_slice(b"{\"type\":\"message\"}\n");
+    std::fs::write(&transcript, bytes).unwrap();
+    let resumed = show_json(&home, &run, "300");
+    assert_eq!(resumed["data"]["no_progress"], false, "{resumed}");
+    assert!(resumed["data"].get("no_progress_detail").is_none());
+}
+
+/// Before the first turn the transcript holds only Taskfleet's header: the
+/// no-progress hint never applies there, whatever the interval
+/// (`startup_blocked` owns that shape).
+#[test]
+fn no_progress_never_applies_before_the_first_turn() {
+    let home = TestHome::new();
+    let run = pending_run(&home, "silent-before-first-turn");
+    let (_stand_in, transcript) = forge_live_pi_worker(&home, &run, false);
+    age_file(&transcript, 600);
+    let show = show_json(&home, &run, "0");
+    assert_eq!(show["data"]["no_progress"], false, "{show}");
+    assert_eq!(show["data"]["startup_blocked"], false, "{show}");
+    let quiet = run_exit(
+        bin(&home)
+            .env("TASKFLEET_NO_PROGRESS_GRACE_SECS", "0")
+            .env("TASKFLEET_STARTUP_BLOCKED_GRACE_SECS", "100000")
+            .args([
+                "--output",
+                "json",
+                "run",
+                "wait",
+                &run,
+                "--timeout",
+                "600ms",
+            ]),
+        2,
+    );
+    assert_eq!(quiet["data"]["runs"][0]["no_progress"], false);
 }

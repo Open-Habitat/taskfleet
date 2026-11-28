@@ -278,7 +278,10 @@ The driver brief is the whole operating manual of the batch. It contains:
   `run reattach <child-run-id>`; a `startup_blocked` child never reached its
   first turn (likely an interactive startup prompt) and is a failed attempt,
   cancelled with `run cancel <child-run-id>` unless a person attaches with
-  `run attach <child-run-id>`; a child that exited cleanly without
+  `run attach <child-run-id>`; a `no_progress` child is alive but has
+  written nothing to its transcript for the interval: attach to look, and
+  cancel it as a failed attempt if it is hung rather than in a long build;
+  a child that exited cleanly without
   `run merge` is a failed attempt, cancelled with `run cancel <child-run-id>`
   so its branch is preserved; a child awaiting input in an autonomous batch
   has hit a brief gap, which is also a failed attempt. Only then does the

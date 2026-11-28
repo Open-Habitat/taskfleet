@@ -63,6 +63,16 @@
 //! at most once and a re-wait does not return at once. It grades as an error
 //! under `--fail-on-error`; `--terminal` ignores it.
 //!
+//! ## Live workers with no progress
+//!
+//! A live autonomous Pi worker past its first turn whose native transcript
+//! has not changed for the no-progress interval ([`crate::run::no_progress`])
+//! settles a default wait with `no_progress: true`, since when no progress
+//! has been seen, and a look/steer/cancel hint. It is anchored like the
+//! startup-blocked wake (later of the last transcript write and this wait's
+//! start), grades as an error under `--fail-on-error`, never changes the
+//! run's status, and `--terminal` ignores it.
+//!
 //! ## Exit codes
 //!
 //! By default, a run counts as *settled* when it reaches a terminal status OR when it is
@@ -252,6 +262,17 @@ struct RunOutcome {
     /// True only when the startup-blocked hint itself satisfied the wait.
     #[serde(skip)]
     settled_startup_blocked: bool,
+    /// Computed hint (never persisted): the live worker passed its first turn
+    /// but its native transcript has been silent for the no-progress interval
+    /// (see [`crate::run::no_progress`]). Visible whenever it holds; it wakes a
+    /// default wait at most once per wait.
+    no_progress: bool,
+    /// Context for [`Self::no_progress`], including `last_progress_at`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    no_progress_detail: Option<crate::run::no_progress::NoProgressView>,
+    /// True only when the no-progress hint itself satisfied the wait.
+    #[serde(skip)]
+    settled_no_progress: bool,
     /// Resume context for an attention-required run — worktree path, source
     /// branch, worker pid, pending age, and a one-line resume hint — so an AI
     /// caller that unblocks on `attention_required` can drive `run merge` from the
@@ -493,6 +514,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             latched.caller = None;
             latched.ask = None;
             latched.startup_woke = false;
+            latched.no_progress_woke = false;
         }
         let mut outcome = read_outcome(run_id, paths, latched)?;
         if args.check_in.is_some() {
@@ -559,6 +581,7 @@ type ProgressKey = (
     Option<(u64, bool)>,
     Option<u64>,
     bool,
+    bool,
 );
 
 fn wait_loop(
@@ -610,6 +633,8 @@ fn wait_loop(
                 ask: settle.ask,
                 startup: settle.startup.clone(),
                 startup_woke: settle.startup_woke,
+                no_progress: settle.no_progress.clone(),
+                no_progress_woke: settle.no_progress_woke,
             };
             // A run is settled when it reaches a terminal status, OR when it is
             // stalled (a supervisor that died — before creating any node, or
@@ -626,6 +651,7 @@ fn wait_loop(
                         || settle.round.is_some()
                         || settle.ask.is_some()
                         || settle.startup_woke
+                        || settle.no_progress_woke
                         || settle.awaiting_input.is_some()
                         || settle
                             .caller
@@ -646,6 +672,7 @@ fn wait_loop(
                     .map(|c| (c.generation, c.state.needs_attention())),
                 settle.ask,
                 settle.startup.is_some(),
+                settle.no_progress.is_some(),
             );
             if progress && prev[i] != Some(key) {
                 emit_progress(run_id, &settle);
@@ -750,6 +777,12 @@ struct Settle {
     startup: Option<crate::run::startup::StartupBlockedView>,
     /// Whether that hint wakes this wait now ([`crate::run::startup::wakes_wait`]).
     startup_woke: bool,
+    /// The live worker has made no observable progress for the interval (see
+    /// [`crate::run::no_progress`]); below startup-blocked.
+    no_progress: Option<crate::run::no_progress::NoProgressView>,
+    /// Whether that hint wakes this wait now
+    /// ([`crate::run::no_progress::wakes_wait`]).
+    no_progress_woke: bool,
 }
 
 /// The two non-terminal settle verdicts a poll can latch for a run — the stall
@@ -769,6 +802,8 @@ struct LatchedSettle {
     ask: Option<u64>,
     startup: Option<crate::run::startup::StartupBlockedView>,
     startup_woke: bool,
+    no_progress: Option<crate::run::no_progress::NoProgressView>,
+    no_progress_woke: bool,
 }
 
 /// Read a run's [`Settle`] snapshot under the shared lock. `None` when the run
@@ -866,6 +901,27 @@ fn current_settle(
         let startup = startup_since.zip(node.as_ref()).map(|(since, n)| {
             crate::run::startup::StartupBlockedView::build(m.run_id.as_str(), n, since, now)
         });
+        // No progress, lowest precedence of all: the same exclusions as
+        // startup-blocked, and never alongside it.
+        let silent_since = node.as_ref().and_then(|n| {
+            crate::run::no_progress::detect(
+                paths,
+                &m,
+                n,
+                attention
+                    || stall.is_some()
+                    || !supervisor.presumed_working()
+                    || round.is_some()
+                    || caller.is_some()
+                    || startup_since.is_some(),
+                now,
+            )
+        });
+        let no_progress_woke = silent_since
+            .is_some_and(|since| crate::run::no_progress::wakes_wait(since, wait_started_at, now));
+        let no_progress = silent_since
+            .zip(node.as_ref())
+            .map(|(since, n)| crate::run::no_progress::NoProgressView::build(&m, n, since, now));
         Ok(Some(Settle {
             status: m.status,
             stall,
@@ -878,6 +934,8 @@ fn current_settle(
             ask,
             startup,
             startup_woke,
+            no_progress,
+            no_progress_woke,
         }))
     })
     .map_err(from_core)
@@ -1052,6 +1110,12 @@ fn read_outcome(
         latched.startup.clone()
     };
     let settled_startup_blocked = startup_blocked_detail.is_some() && latched.startup_woke;
+    let no_progress_detail = if status.is_terminal() {
+        None
+    } else {
+        latched.no_progress.clone()
+    };
+    let settled_no_progress = no_progress_detail.is_some() && latched.no_progress_woke;
     // `error` explains a non-`done` settle. For failed/cancelled the §7.3 report
     // has no dedicated error field, so surface the cancel `reason` when present;
     // for a stalled settle (a `pending`/`running` run graded as a failure under
@@ -1080,6 +1144,8 @@ fn read_outcome(
         Some(crate::run::awaiting_input::AWAITING_INPUT_REASON.to_string())
     } else if settled_startup_blocked {
         Some(crate::run::startup::REASON.to_string())
+    } else if settled_no_progress {
+        Some(crate::run::no_progress::REASON.to_string())
     } else if matches!(status, Status::Failed | Status::Cancelled) {
         report
             .as_ref()
@@ -1149,6 +1215,9 @@ fn read_outcome(
         startup_blocked: startup_blocked_detail.is_some(),
         startup_blocked_detail,
         settled_startup_blocked,
+        no_progress: no_progress_detail.is_some(),
+        no_progress_detail,
+        settled_no_progress,
         attention,
         summary,
         error,
@@ -1229,6 +1298,7 @@ fn any_settled_error(outcomes: &[RunOutcome], terminal_only: bool) -> bool {
             || o.attention_required
             || o.settled_awaiting_input
             || o.settled_startup_blocked
+            || o.settled_no_progress
             || o.caller_agent.as_ref().is_some_and(|v| v.settled_generation.is_some() && !matches!(o.status, "done" | "failed" | "cancelled"))
             // A confirmed merge may still be in the supervisor's teardown window.
             // A report-only success has no merge authority and must be reviewed.
@@ -1248,6 +1318,7 @@ fn emit_progress(run_id: &str, settle: &Settle) {
     let attention_required = settle.attention;
     let awaiting_input = settle.awaiting_input.is_some();
     let startup_blocked = settle.startup.is_some();
+    let no_progress = settle.no_progress.is_some();
     let ask = settle.ask;
     let caller = settle
         .caller
@@ -1260,6 +1331,7 @@ fn emit_progress(run_id: &str, settle: &Settle) {
         "attention_required": attention_required,
         "awaiting_input": awaiting_input,
         "startup_blocked": startup_blocked,
+        "no_progress": no_progress,
     });
     if let Some(ask_id) = ask {
         event["ask_id"] = serde_json::json!(ask_id);
@@ -1390,6 +1462,14 @@ fn emit(data: &WaitData, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                     print!(
                         "  startup_blocked=true (`run attach {id}` to see the prompt, \
                          or `run cancel {id}`)",
+                        id = r.run_id
+                    );
+                }
+                if let Some(silent) = &r.no_progress_detail {
+                    print!(
+                        "  no_progress=true (no transcript write since {at}; `run attach {id}` \
+                         to look, `run message {id} <text>` to steer, or `run cancel {id}`)",
+                        at = silent.last_progress_at,
                         id = r.run_id
                     );
                 }
@@ -1554,6 +1634,9 @@ mod tests {
             startup_blocked: false,
             startup_blocked_detail: None,
             settled_startup_blocked: false,
+            no_progress: false,
+            no_progress_detail: None,
+            settled_no_progress: false,
             attention: None,
             summary: None,
             error: None,

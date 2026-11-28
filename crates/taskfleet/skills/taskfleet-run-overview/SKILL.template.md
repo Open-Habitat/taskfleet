@@ -131,6 +131,7 @@ identically from both verbs.
   "awaiting_input": false,
   "open_discussion_count": 0,
   "startup_blocked": false,
+  "no_progress": false,
   "telemetry_available": true,
   "telemetry_counts": { ... }
 }
@@ -197,6 +198,20 @@ each has a different remedy:
   or `run cancel`. It is a read-time hint with the lowest precedence and
   never appears beside the shapes above; Claude workers and resumed resident
   rounds have no such signal, so its absence proves nothing.
+- `no_progress` — a live autonomous Pi worker passed its first turn, its
+  supervisor is alive and it has not exited, but its native transcript has not
+  changed for the no-progress interval (two hours,
+  `TASKFLEET_NO_PROGRESS_GRACE_SECS`). It may be hung (a stalled model request,
+  a tool command that never returns), or it may be running one long tool call
+  such as a multi-hour build, which writes nothing until it ends.
+  `no_progress_detail.last_progress_at` says since when no progress has been
+  seen, with `silent_secs`, worker pid, and a `resume_hint`. Look first with
+  `run attach <run-id>`; if it is hung, steer it with
+  `run message <run-id> <text>`, end a resident's round with
+  `run interrupt <name>`, or lay it to rest with `run cancel` (unmerged work is
+  preserved). It only informs: nothing is killed or failed, it clears by itself
+  as soon as the transcript is written again, it never appears beside the
+  shapes above or `startup_blocked`, and Claude workers have no such signal.
 - `open_ask` — the worker asked its parent a blocking question with
   `taskfleet node ask` (ADR 0004) and waits for the answer; present only while
   one is open. It carries `ask_id`, `question`, `options`, the worker's
@@ -274,8 +289,9 @@ Waiting can cover several ids, so its shape differs from `run show`:
 `data.outcome` is `condition-met`, `timed-out`, or `check-in`, and per-run results are in
 `data.runs[]` (`run_id`, `status`, `merged`, `report_only`, `landed`,
 `landed_method`, `stalled`, `attention_required`, `awaiting_input`,
-`startup_blocked`, `preserved_work`, plus `summary`, `error`, `attention`,
-`awaiting_input_detail`, `startup_blocked_detail`, `asked`, `open_ask`, `last_ask`, and
+`startup_blocked`, `no_progress`, `preserved_work`, plus `summary`, `error`,
+`attention`, `awaiting_input_detail`, `startup_blocked_detail`,
+`no_progress_detail`, `asked`, `open_ask`, `last_ask`, and
 `recoverable_work` when present). There
 is no `data.status`; read the runs array. Read `outcome` first: `timed-out` is
 not completion, and the field is authoritative even when a pipeline swallowed
@@ -300,7 +316,10 @@ progress on its own: stalled, attention-required, or awaiting input past a
 short grace. A startup-blocked worker settles a default wait once a grace
 has passed since the later of the worker's start and the wait's own start,
 so waiting again after a wake does not return at once; it grades as an
-error under `--fail-on-error`. An open worker question settles it at once, with no grace:
+error under `--fail-on-error`. A `no_progress` worker settles a default wait
+the same way, once the interval has passed since the later of its last
+transcript write and the wait's own start; a re-wait in the same silence is
+woken again only after another full interval. An open worker question settles it at once, with no grace:
 `asked: true` and `open_ask` say what to answer. That is not an error and
 never trips `--fail-on-error`; answer it (or escalate it) and wait again. An
 escalated or expired question does not settle the wait. A named resident run also settles, at once, when its worker

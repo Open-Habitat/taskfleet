@@ -85,8 +85,12 @@ Absent telemetry or prompt evidence is unknown, not health. This remains a plain
 blocking command and requires no desktop or host-specific wake extension.
 
 Read `data.outcome` and `data.runs[]`: timeout is not completion, and attention,
-stall, awaiting-input, or a worker's question can settle a wait without a
-terminal success. Resolve that condition; a question (`asked: true`) is answered
+stall, awaiting-input, a worker's question, or a startup-blocked or
+`no_progress` worker can settle a wait without a terminal success.
+`no_progress` means the live worker has written nothing to its transcript
+since `no_progress_detail.last_progress_at`: look with `run attach`, then
+steer it with `run message`, end a resident's round with `run interrupt`, or
+`run cancel` it; a long tool call can look the same, so look before acting. Resolve that condition; a question (`asked: true`) is answered
 with `taskfleet run answer <run-id> --ask <open_ask.ask_id> --choice <option>`
 (or `--text`) before waiting again. `--terminal` waits for the eventual terminal
 result but answers no decision. Then read `taskfleet run show <run-id> --output json` for the full

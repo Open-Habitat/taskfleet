@@ -360,6 +360,17 @@ pub struct RunSummary {
     /// Context for [`Self::startup_blocked`]; omitted unless it is true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub startup_blocked_detail: Option<crate::run::startup::StartupBlockedView>,
+    /// Computed hint (never persisted): the live worker passed its first turn
+    /// but has written nothing to its native transcript for the no-progress
+    /// interval, so it may be hung (see [`crate::run::no_progress`]). It only
+    /// informs: look with `run attach`, steer with `run message`, or
+    /// `run cancel`. Never set together with `attention_required`, `stalled`,
+    /// `startup_blocked`, an open request, or an open question.
+    pub no_progress: bool,
+    /// Context for [`Self::no_progress`], including since when no progress
+    /// has been seen; omitted unless it is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_progress_detail: Option<crate::run::no_progress::NoProgressView>,
     /// Full question/options/default context, omitted when no request is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub awaiting_input_detail: Option<crate::run::awaiting_input::AwaitingInputView>,
@@ -513,6 +524,18 @@ impl RunSummary {
         self.startup_blocked_detail = detail;
         self
     }
+
+    /// Attach the no-progress hint. The caller computes it only when no
+    /// higher-precedence verdict holds.
+    #[must_use]
+    pub fn with_no_progress(
+        mut self,
+        detail: Option<crate::run::no_progress::NoProgressView>,
+    ) -> Self {
+        self.no_progress = detail.is_some();
+        self.no_progress_detail = detail;
+        self
+    }
 }
 
 impl From<&Manifest> for RunSummary {
@@ -544,6 +567,8 @@ impl From<&Manifest> for RunSummary {
             telemetry_counts: crate::run::telemetry::TelemetryCounts::default(),
             startup_blocked: false,
             startup_blocked_detail: None,
+            no_progress: false,
+            no_progress_detail: None,
             awaiting_input_detail: None,
             open_ask: None,
             last_ask: None,
@@ -664,6 +689,7 @@ mod tests {
                 "awaiting_input": false,
                 "open_discussion_count": 0,
                 "startup_blocked": false,
+                "no_progress": false,
                 "telemetry_available": false,
                 "telemetry_counts": {
                     "absent": 0,

@@ -236,6 +236,20 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                 now,
             )
         });
+        // No progress (`crate::run::no_progress`): lowest precedence of all,
+        // below startup-blocked, from the same snapshot.
+        let no_progress = node.as_ref().and_then(|n| {
+            crate::run::no_progress::view(
+                &paths,
+                &manifest,
+                n,
+                attention.is_some()
+                    || stall.is_some()
+                    || !supervisor.presumed_working()
+                    || startup_blocked.is_some(),
+                now,
+            )
+        });
         let landing = LandingFields {
             source_repo: manifest.source_repo.clone(),
             source_branch: manifest.source_branch.clone(),
@@ -259,6 +273,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
             awaiting_input,
             ask_views,
             startup_blocked,
+            no_progress,
             landing,
             nodes,
             transcripts,
@@ -277,6 +292,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         awaiting_input,
         ask_views,
         startup_blocked,
+        no_progress,
         landing,
         nodes,
         transcripts,
@@ -355,6 +371,7 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
         .with_awaiting_input(awaiting_input)
         .with_ask(ask_views)
         .with_startup_blocked(startup_blocked)
+        .with_no_progress(no_progress)
         .with_resident(crate::run::resident::view(
             &manifest,
             nodes.iter().find(|n| n.node_id.as_str() == "n-0001"),
@@ -532,6 +549,20 @@ pub fn run(run_id: &str, spec: &OutputSpec, warnings: &[String]) -> Result<(), C
                     age = blocked.pending_age_secs,
                     grace = blocked.grace_secs,
                     hint = blocked.resume_hint,
+                );
+            }
+            if let Some(silent) = &payload.summary.no_progress_detail {
+                let pid = silent
+                    .worker_pid
+                    .map_or_else(|| "?".to_string(), |p| p.to_string());
+                println!(
+                    "no-progress:   true — {reason} (worker pid {pid}, last progress {at}, \
+                     silent {mins} min, interval {interval} s). {hint}",
+                    reason = silent.reason,
+                    at = silent.last_progress_at,
+                    mins = silent.silent_secs / 60,
+                    interval = silent.interval_secs,
+                    hint = silent.resume_hint,
                 );
             }
             if let Some(resident) = &payload.summary.resident {

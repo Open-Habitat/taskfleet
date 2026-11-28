@@ -127,7 +127,7 @@ fn classify_transcript(path: &Path) -> FirstTurn {
 /// Pure classification of the transcript's leading bytes: exactly one
 /// complete JSON line whose `type` is `session`, followed by nothing but
 /// whitespace, is the untouched header.
-fn classify_bytes(bytes: &[u8]) -> FirstTurn {
+pub(crate) fn classify_bytes(bytes: &[u8]) -> FirstTurn {
     let Some(newline) = bytes.iter().position(|b| *b == b'\n') else {
         return FirstTurn::Reached;
     };

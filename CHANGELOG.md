@@ -9,6 +9,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A live autonomous Pi worker that has stopped making progress after its first turn is now surfaced to the parent instead of reading as a healthy pending run (`silent-working-worker`). When the supervisor is alive, the worker has not exited, and the attempt's native transcript has not changed for two hours (`TASKFLEET_NO_PROGRESS_GRACE_SECS` overrides the interval), `run show`, `run list` and `run wait` report `no_progress: true` with a `no_progress_detail` saying since when no progress has been seen (`last_progress_at`) and naming `run attach` to look, `run message` to steer, `run interrupt` for a resident, or `run cancel`. A default `run wait` wakes on it once the interval has passed since the later of the last transcript write and the wait's own start, so waiting again does not return at once; it grades as an error under `--fail-on-error` and `--terminal` ignores it. It only informs: no event is recorded, nothing is killed, the run's status never changes, and the next transcript write clears it. A single long tool call (a multi-hour build) writes nothing until it ends and can show the hint; the long default interval is the guard. Claude workers, caller-owned runs and interactive runs have no such signal.
+
 ### Changed
 
 ### Fixed

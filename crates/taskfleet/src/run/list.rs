@@ -258,6 +258,18 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                     now,
                 )
             });
+            let no_progress = diagnostic_node.and_then(|n| {
+                crate::run::no_progress::view(
+                    &paths,
+                    &m,
+                    n,
+                    attention.is_some()
+                        || stillborn
+                        || !supervisor.presumed_working()
+                        || startup_blocked.is_some(),
+                    now,
+                )
+            });
             Ok(Some((
                 m,
                 supervisor,
@@ -269,6 +281,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
                 resident,
                 ask_views,
                 startup_blocked,
+                no_progress,
             )))
         })
         .map_err(from_core)?;
@@ -283,6 +296,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             resident,
             ask_views,
             startup_blocked,
+            no_progress,
         ) = match scanned {
             Some(v) => v,
             None => continue, // half-initialized run dir; skip silently
@@ -305,6 +319,7 @@ pub fn run(args: Args<'_>) -> Result<(), CliError> {
             .with_awaiting_input(awaiting_input)
             .with_ask(ask_views)
             .with_startup_blocked(startup_blocked)
+            .with_no_progress(no_progress)
             .with_resident(resident);
         // Filter the exact DTO values while still avoiding telemetry I/O for
         // excluded rows.
@@ -492,6 +507,10 @@ fn emit(runs: Vec<RunSummary>, spec: &OutputSpec, warnings: &[String]) -> Result
                     // A live worker that never reached its first turn: likely
                     // stopped at an interactive startup prompt (`run attach`).
                     format!("{} (startup-blocked)", r.status)
+                } else if r.no_progress {
+                    // A live worker past its first turn whose transcript has
+                    // been silent for the no-progress interval.
+                    format!("{} (no-progress)", r.status)
                 } else {
                     r.status.clone()
                 };
