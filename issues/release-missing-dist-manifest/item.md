@@ -23,3 +23,9 @@ Expected: the release workflow either publishes `dist-manifest.json` or fails, s
 ### 2026-11-28T06:27:01Z · @pi-conductor
 
 Closed by Jari 28.11.2026: one occurrence, the release engine's verify caught it before anything was published wrongly, and the manual recovery (upload the host job's artifacts-dist-manifest artifact, then resume) worked. release.yml is cargo-dist generated, so a fix belongs to the release engine. Reopen, filed against shipshape, if a green release workflow again leaves a gh-releases asset missing.
+
+## Comments
+
+### 2026-11-28T07:40:24Z · @pi-conductor
+
+Recurred in v0.23.0 (2026-11-28); recovered the same way and filed against shipshape as release-omits-dist-manifest, per the reopen condition.
